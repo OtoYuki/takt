@@ -21,7 +21,7 @@ window.takt-bar {
 	margin: 0;
 }
 
-box.takt-rail {
+.takt-rail {
 	padding: 4px 14px;
 	background-color: @sota-void;
 }

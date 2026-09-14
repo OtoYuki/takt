@@ -25,17 +25,18 @@ impl SimpleComponent for AppModel {
         #[root]
         gtk4::ApplicationWindow {
             set_title: Some("takt"),
-            set_default_size: (2560, 44),
+            set_default_size: (2560, 48),
             add_css_class: "takt-bar",
 
-            gtk4::Box {
+            gtk4::CenterBox {
                 set_orientation: gtk4::Orientation::Horizontal,
                 set_hexpand: true,
                 add_css_class: "takt-rail",
 
-                // Left: Workspaces Pod
-                gtk4::Box {
+                #[wrap(Some)]
+                set_start_widget = &gtk4::Box {
                     set_orientation: gtk4::Orientation::Horizontal,
+                    set_valign: gtk4::Align::Center,
                     add_css_class: "tactile-pod",
                     add_css_class: "pod-workspaces",
 
@@ -54,18 +55,19 @@ impl SimpleComponent for AppModel {
                     },
                 },
 
-                // Center Spacer
-                gtk4::Box {
-                    set_hexpand: true,
-                },
-
-                // Center: Master Chronometer
-                gtk4::Box {
+                #[wrap(Some)]
+                set_center_widget = &gtk4::Box {
                     set_orientation: gtk4::Orientation::Horizontal,
+                    set_valign: gtk4::Align::Center,
                     add_css_class: "tactile-pod",
                     add_css_class: "pod-clock",
 
                     gtk4::Label {
+                        set_markup: &format!(
+                            "<span font_family='Freigeist' font_weight='800' font_size='11pt' foreground='#FBFFE1'>{}</span> <span font_family='Geist Mono' foreground='#5A6042'>::</span> <span font_family='Goga' font_weight='bold' font_size='10pt' foreground='#D1CF8B'>{}</span>",
+                            model.time_str,
+                            model.date_str
+                        ),
                         #[watch]
                         set_markup: &format!(
                             "<span font_family='Freigeist' font_weight='800' font_size='11pt' foreground='#FBFFE1'>{}</span> <span font_family='Geist Mono' foreground='#5A6042'>::</span> <span font_family='Goga' font_weight='bold' font_size='10pt' foreground='#D1CF8B'>{}</span>",
@@ -75,20 +77,20 @@ impl SimpleComponent for AppModel {
                     },
                 },
 
-                // Right Spacer
-                gtk4::Box {
-                    set_hexpand: true,
-                },
-
-                // Right: Unified Hardware Deck
-                gtk4::Box {
+                #[wrap(Some)]
+                set_end_widget = &gtk4::Box {
                     set_orientation: gtk4::Orientation::Horizontal,
+                    set_valign: gtk4::Align::Center,
                     add_css_class: "tactile-pod",
                     add_css_class: "pod-hardware",
 
                     // CPU
                     gtk4::Label {
                         add_css_class: "instrument-cell",
+                        set_markup: &format!(
+                            "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>CPU</span> <span font_family='Geist Mono' font_weight='bold' foreground='#999208'>{:>2.0}%</span>",
+                            model.cpu_usage
+                        ),
                         #[watch]
                         set_markup: &format!(
                             "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>CPU</span> <span font_family='Geist Mono' font_weight='bold' foreground='#999208'>{:>2.0}%</span>",
@@ -98,6 +100,10 @@ impl SimpleComponent for AppModel {
                     // RAM
                     gtk4::Label {
                         add_css_class: "instrument-cell",
+                        set_markup: &format!(
+                            "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>RAM</span> <span font_family='Geist Mono' font_weight='bold' foreground='#D1CF8B'>{:>2.0}%</span>",
+                            model.mem_usage
+                        ),
                         #[watch]
                         set_markup: &format!(
                             "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>RAM</span> <span font_family='Geist Mono' font_weight='bold' foreground='#D1CF8B'>{:>2.0}%</span>",
@@ -122,10 +128,14 @@ impl SimpleComponent for AppModel {
         root.set_anchor(Edge::Right, true);
         root.auto_exclusive_zone_enable();
 
+        let mut sys = sysinfo::System::new_all();
+        sys.refresh_memory();
+        let mem = (sys.used_memory() as f32 / sys.total_memory() as f32) * 100.0;
+
         let now = chrono::Local::now();
         let model = AppModel {
             cpu_usage: 0.0,
-            mem_usage: 0.0,
+            mem_usage: mem,
             time_str: now.format("%H:%M").to_string(),
             date_str: now.format("%a %d %b").to_string(),
         };
