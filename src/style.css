@@ -1,5 +1,17 @@
 /* ==========================================================================
    Takt: SOTA Micrographic Wayland Telemetry Deck (GTK4 CSS)
+   Teenage Engineering & Nothing OS Industrial Vernacular
+   Strict adherence to user swatch tokens:
+   - #141C10 : Void Black Chassis (100% Solid Opaque)
+   - #999208 : Acid Olive / Chartreuse Phosphor
+   - #D8A664 : Warm Ochre / Apricot Anodized Accent
+   - #5A6042 : Weathered Army Moss / Structural Border
+   - #3b442b : Sub-border / Panel Milled Lines
+   - #1c2517 : Machined Pod Panel
+   - #25301e : Panel Hover / Occupied State
+   - #D1CF8B : Pistachio Cream / Telemetry Secondary
+   - #FBFFE1 : Bone Ivory / Primary Display Readout
+   - #BE5D3C : Industrial Hazard Vermilion / Mute / Alert
    ========================================================================== */
 
 @define-color sota-void        #141C10;
@@ -8,10 +20,16 @@
 @define-color sota-border      #5A6042;
 @define-color sota-border-sub  #3b442b;
 @define-color sota-panel       #1c2517;
-@define-color sota-panel-hover #2c3820;
+@define-color sota-panel-hover #25301e;
 @define-color sota-pista       #D1CF8B;
 @define-color sota-bone        #FBFFE1;
 @define-color sota-crit        #BE5D3C;
+
+* {
+	all: unset;
+	color: @sota-bone;
+	font-family: "Geist Mono", monospace;
+}
 
 window.takt-bar {
 	background-color: @sota-void;
@@ -22,12 +40,12 @@ window.takt-bar {
 }
 
 .takt-rail {
-	padding: 4px 14px;
+	padding: 3px 12px;
 	background-color: @sota-void;
 }
 
 /* --------------------------------------------------------------------------
-   Tactile Pods (Floating Machined Chassis)
+   Tactile Pods (Milled Machined Chassis)
    -------------------------------------------------------------------------- */
 
 box.tactile-pod {
@@ -35,7 +53,7 @@ box.tactile-pod {
 	border: 1px solid @sota-border-sub;
 	border-radius: 2px;
 	box-shadow: inset 0 1px 0 rgba(216, 166, 100, 0.08);
-	transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+	transition: all 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 box.tactile-pod:hover {
@@ -47,26 +65,36 @@ box.tactile-pod:hover {
    -------------------------------------------------------------------------- */
 
 box.pod-workspaces {
-	padding: 2px 4px;
+	padding: 2px 3px;
 }
 
 button.ws-btn {
 	border-radius: 2px;
-	min-width: 24px;
-	min-height: 24px;
-	padding: 2px 7px;
+	min-width: 22px;
+	min-height: 22px;
+	padding: 2px 6px;
 	margin: 1px 2px;
 	background: transparent;
 	border: 1px solid transparent;
-	font-family: "Geist Pixel Circle", "Geist Mono", monospace;
+	font-family: "Geist Mono", monospace;
 	font-weight: 800;
-	font-size: 12px;
-	color: @sota-pista;
-	transition: all 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+	font-size: 11px;
+	transition: all 0.12s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-button.ws-btn:hover {
+button.ws-btn.empty {
+	color: #485239;
+	background: transparent;
+	border-color: transparent;
+}
+
+button.ws-btn.occupied {
 	background-color: @sota-panel-hover;
+	border: 1px solid @sota-border-sub;
+	color: @sota-pista;
+}
+
+button.ws-btn.occupied:hover {
 	border-color: @sota-border;
 	color: @sota-bone;
 }
@@ -75,7 +103,21 @@ button.ws-btn.active {
 	background-color: @sota-ochre;
 	border-color: @sota-ochre;
 	color: @sota-void;
-	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 3px rgba(0, 0, 0, 0.4);
+	font-weight: 900;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* --------------------------------------------------------------------------
+   Active Window Title Pod
+   -------------------------------------------------------------------------- */
+
+box.pod-window {
+	padding: 3px 12px;
+	box-shadow: inset 0 1px 0 rgba(153, 146, 8, 0.08);
+}
+
+box.pod-window:hover {
+	border-color: @sota-acid;
 }
 
 /* --------------------------------------------------------------------------
@@ -84,12 +126,33 @@ button.ws-btn.active {
 
 box.pod-clock {
 	padding: 3px 18px;
-	box-shadow: inset 0 1px 0 rgba(216, 166, 100, 0.12);
+	border-color: @sota-border;
+	box-shadow: inset 0 1px 0 rgba(216, 166, 100, 0.15);
 }
 
 box.pod-clock:hover {
 	border-color: @sota-ochre;
-	box-shadow: 0 0 12px rgba(216, 166, 100, 0.2), inset 0 1px 0 rgba(216, 166, 100, 0.2);
+	box-shadow: 0 0 12px rgba(216, 166, 100, 0.2), inset 0 1px 0 rgba(216, 166, 100, 0.25);
+}
+
+/* --------------------------------------------------------------------------
+   Media / MPRIS Pod
+   -------------------------------------------------------------------------- */
+
+box.pod-media {
+	padding: 0;
+}
+
+button.media-btn {
+	padding: 3px 12px;
+	background: transparent;
+	border: none;
+	border-radius: 2px;
+	transition: background-color 0.12s ease-in-out;
+}
+
+button.media-btn:hover {
+	background-color: @sota-panel-hover;
 }
 
 /* --------------------------------------------------------------------------
@@ -100,16 +163,26 @@ box.pod-hardware {
 	padding: 0;
 }
 
-label.instrument-cell {
-	padding: 3px 14px;
-	border-right: 1px solid @sota-border;
-	transition: all 0.15s ease-in-out;
+label.instrument-cell,
+button.instrument-btn {
+	padding: 3px 11px;
+	background: transparent;
+	border: none;
+	border-right: 1px solid @sota-border-sub;
+	border-radius: 0;
+	margin: 0;
+	transition: background-color 0.12s ease-in-out;
 }
 
-label.instrument-cell:last-child {
-	border-right: none;
-}
-
-label.instrument-cell:hover {
+label.instrument-cell:hover,
+button.instrument-btn:hover {
 	background-color: @sota-panel-hover;
+}
+
+button.instrument-btn:active {
+	background-color: #313d28;
+}
+
+box.pod-hardware > :last-child {
+	border-right: none;
 }
