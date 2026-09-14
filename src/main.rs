@@ -29,6 +29,7 @@ struct HyprMonitor {
 struct AppModel {
     _target_monitor: String,
     ws_base: u32,
+    is_compact: bool,
 
     time_str: String,
     date_str: String,
@@ -196,11 +197,12 @@ fn clock_markup(time: &str, date: &str, sec: &str, tick: bool) -> String {
     )
 }
 
-fn window_title_markup(title: &str) -> String {
+fn window_title_markup(title: &str, is_compact: bool) -> String {
     let escaped = gtk4::glib::markup_escape_text(title);
+    let max_len = if is_compact { 18 } else { 34 };
     let char_count = escaped.chars().count();
-    let display = if char_count > 34 {
-        let truncated: String = escaped.chars().take(34).collect();
+    let display = if char_count > max_len {
+        let truncated: String = escaped.chars().take(max_len).collect();
         format!("{}…", truncated)
     } else {
         escaped.to_string()
@@ -211,7 +213,7 @@ fn window_title_markup(title: &str) -> String {
     )
 }
 
-fn media_markup(status: Option<&str>, title: Option<&str>) -> String {
+fn media_markup(status: Option<&str>, title: Option<&str>, is_compact: bool) -> String {
     if let (Some(s), Some(t)) = (status, title) {
         let (icon, col) = if s == "Playing" {
             ("⏵ PLAY", "#D8A664")
@@ -219,9 +221,10 @@ fn media_markup(status: Option<&str>, title: Option<&str>) -> String {
             ("⏸ PAUS", "#5A6042")
         };
         let escaped = gtk4::glib::markup_escape_text(t);
+        let max_len = if is_compact { 14 } else { 24 };
         let char_count = escaped.chars().count();
-        let display = if char_count > 24 {
-            let truncated: String = escaped.chars().take(24).collect();
+        let display = if char_count > max_len {
+            let truncated: String = escaped.chars().take(max_len).collect();
             format!("{}…", truncated)
         } else {
             escaped.to_string()
@@ -326,9 +329,9 @@ impl SimpleComponent for AppModel {
                         add_css_class: "pod-window",
 
                         gtk4::Label {
-                            set_markup: &window_title_markup(&model.window_title),
+                            set_markup: &window_title_markup(&model.window_title, model.is_compact),
                             #[watch]
-                            set_markup: &window_title_markup(&model.window_title),
+                            set_markup: &window_title_markup(&model.window_title, model.is_compact),
                         },
                     },
                 },
@@ -367,9 +370,9 @@ impl SimpleComponent for AppModel {
                             add_css_class: "media-btn",
                             connect_clicked => AppMsg::ToggleMedia,
                             gtk4::Label {
-                                set_markup: &media_markup(model.media_status.as_deref(), model.media_title.as_deref()),
+                                set_markup: &media_markup(model.media_status.as_deref(), model.media_title.as_deref(), model.is_compact),
                                 #[watch]
-                                set_markup: &media_markup(model.media_status.as_deref(), model.media_title.as_deref()),
+                                set_markup: &media_markup(model.media_status.as_deref(), model.media_title.as_deref(), model.is_compact),
                             }
                         }
                     },
@@ -444,6 +447,10 @@ impl SimpleComponent for AppModel {
         } else {
             1
         };
+        let is_compact = target_monitor.starts_with("eDP");
+        if is_compact {
+            root.add_css_class("compact");
+        }
 
         // Initialize Wayland Layer Shell
         root.init_layer_shell();
@@ -486,6 +493,7 @@ impl SimpleComponent for AppModel {
         let model = AppModel {
             _target_monitor: target_monitor.clone(),
             ws_base,
+            is_compact,
 
             time_str: now.format("%H:%M").to_string(),
             date_str: now.format("%a %d %b").to_string().to_uppercase(),
@@ -776,31 +784,41 @@ fn read_hyprland_state(target_monitor: &str) -> (u32, Vec<u32>, String) {
 }
 
 fn detect_monitors() -> Vec<String> {
+    let mut names = Vec::new();
     if let Ok(output) = std::process::Command::new("hyprctl")
         .args(["monitors", "-j"])
         .output()
     {
         if let Ok(monitors) = serde_json::from_slice::<Vec<HyprMonitor>>(&output.stdout) {
-            let names: Vec<String> = monitors.into_iter().map(|m| m.name).collect();
-            if !names.is_empty() {
-                return names;
+            for m in &monitors {
+                if m.name == "HDMI-A-1" {
+                    names.push(m.name.clone());
+                }
+            }
+            for m in monitors {
+                if m.name != "HDMI-A-1" {
+                    names.push(m.name);
+                }
             }
         }
     }
-    vec!["HDMI-A-1".to_string()]
+    if names.is_empty() {
+        names.push("HDMI-A-1".to_string());
+    }
+    names
 }
 
 fn run_monitor(mon_name: String) {
     let clean_mon = mon_name.replace(['-', '.'], "_");
     let app_id = format!("dev.s1re.takt.{}", clean_mon);
-    let app = RelmApp::new(&app_id);
+    let app = RelmApp::new(&app_id).with_args(vec!["takt".to_string()]);
     relm4::set_global_css(include_str!("style.css"));
     app.run::<AppModel>(mon_name);
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let mut target_monitor = None;
+    let mut target_monitor = std::env::var("TAKT_MONITOR").ok();
     let mut i = 1;
     while i < args.len() {
         if args[i] == "--monitor" && i + 1 < args.len() {
@@ -813,20 +831,19 @@ fn main() {
     if let Some(mon_name) = target_monitor {
         run_monitor(mon_name);
     } else {
-        let monitors = detect_monitors();
-        if monitors.len() <= 1 {
-            let mon_name = monitors
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| "HDMI-A-1".to_string());
-            run_monitor(mon_name);
-        } else {
-            let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("takt"));
-            for mon in monitors {
-                let _ = std::process::Command::new(&exe)
-                    .args(["--monitor", &mon])
-                    .spawn();
-            }
+        let mut monitors = detect_monitors();
+        if monitors.is_empty() {
+            monitors.push("HDMI-A-1".to_string());
         }
+        let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("takt"));
+        for mon in monitors.iter().skip(1) {
+            let _ = std::process::Command::new(&exe)
+                .args(["--monitor", mon])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
+        run_monitor(monitors[0].clone());
     }
 }

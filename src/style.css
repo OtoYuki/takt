@@ -186,3 +186,38 @@ button.instrument-btn:active {
 box.pod-hardware > :last-child {
 	border-right: none;
 }
+
+/* --------------------------------------------------------------------------
+   Compact Adaptive Profile (eDP-2 / Scaled Laptop Displays)
+   -------------------------------------------------------------------------- */
+
+window.compact .takt-rail {
+	padding: 3px 6px;
+}
+
+window.compact box.pod-workspaces {
+	padding: 2px 2px;
+}
+
+window.compact button.ws-btn {
+	padding: 2px 4px;
+	min-width: 18px;
+	margin: 1px 1px;
+}
+
+window.compact box.pod-window {
+	padding: 3px 8px;
+}
+
+window.compact box.pod-clock {
+	padding: 3px 10px;
+}
+
+window.compact button.media-btn {
+	padding: 3px 8px;
+}
+
+window.compact label.instrument-cell,
+window.compact button.instrument-btn {
+	padding: 3px 6px;
+}
