@@ -1,0 +1,115 @@
+/* ==========================================================================
+   Takt: SOTA Micrographic Wayland Telemetry Deck (GTK4 CSS)
+   ========================================================================== */
+
+@define-color sota-void        #141C10;
+@define-color sota-acid        #999208;
+@define-color sota-ochre       #D8A664;
+@define-color sota-border      #5A6042;
+@define-color sota-border-sub  #3b442b;
+@define-color sota-panel       #1c2517;
+@define-color sota-panel-hover #2c3820;
+@define-color sota-pista       #D1CF8B;
+@define-color sota-bone        #FBFFE1;
+@define-color sota-crit        #BE5D3C;
+
+window.takt-bar {
+	background-color: @sota-void;
+	border-bottom: 1px solid #2c3620;
+	box-shadow: 0 1px 0 #141C10;
+	padding: 0;
+	margin: 0;
+}
+
+box.takt-rail {
+	padding: 4px 14px;
+	background-color: @sota-void;
+}
+
+/* --------------------------------------------------------------------------
+   Tactile Pods (Floating Machined Chassis)
+   -------------------------------------------------------------------------- */
+
+box.tactile-pod {
+	background-color: @sota-panel;
+	border: 1px solid @sota-border-sub;
+	border-radius: 2px;
+	box-shadow: inset 0 1px 0 rgba(216, 166, 100, 0.08);
+	transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+box.tactile-pod:hover {
+	border-color: @sota-border;
+}
+
+/* --------------------------------------------------------------------------
+   Workspaces Pod
+   -------------------------------------------------------------------------- */
+
+box.pod-workspaces {
+	padding: 2px 4px;
+}
+
+button.ws-btn {
+	border-radius: 2px;
+	min-width: 24px;
+	min-height: 24px;
+	padding: 2px 7px;
+	margin: 1px 2px;
+	background: transparent;
+	border: 1px solid transparent;
+	font-family: "Geist Pixel Circle", "Geist Mono", monospace;
+	font-weight: 800;
+	font-size: 12px;
+	color: @sota-pista;
+	transition: all 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+button.ws-btn:hover {
+	background-color: @sota-panel-hover;
+	border-color: @sota-border;
+	color: @sota-bone;
+}
+
+button.ws-btn.active {
+	background-color: @sota-ochre;
+	border-color: @sota-ochre;
+	color: @sota-void;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* --------------------------------------------------------------------------
+   Master Chronometer Pod
+   -------------------------------------------------------------------------- */
+
+box.pod-clock {
+	padding: 3px 18px;
+	box-shadow: inset 0 1px 0 rgba(216, 166, 100, 0.12);
+}
+
+box.pod-clock:hover {
+	border-color: @sota-ochre;
+	box-shadow: 0 0 12px rgba(216, 166, 100, 0.2), inset 0 1px 0 rgba(216, 166, 100, 0.2);
+}
+
+/* --------------------------------------------------------------------------
+   Unified Hardware Instrument Deck
+   -------------------------------------------------------------------------- */
+
+box.pod-hardware {
+	padding: 0;
+}
+
+label.instrument-cell {
+	padding: 3px 14px;
+	border-right: 1px solid @sota-border;
+	transition: all 0.15s ease-in-out;
+}
+
+label.instrument-cell:last-child {
+	border-right: none;
+}
+
+label.instrument-cell:hover {
+	background-color: @sota-panel-hover;
+}
