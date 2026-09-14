@@ -1,6 +1,8 @@
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use relm4::prelude::*;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::net::UnixStream;
 
 #[derive(serde::Deserialize)]
 struct HyprWindow {
@@ -493,7 +495,7 @@ impl SimpleComponent for AppModel {
         let (media_status, media_title) = read_media()
             .map(|(s, t)| (Some(s), Some(t)))
             .unwrap_or((None, None));
-        let (active_ws, occupied_ws, window_title) = read_hyprland_state(&target_monitor);
+        let (active_ws, occupied_ws, window_title) = read_hyprland_state_fast(&target_monitor);
 
         let now = chrono::Local::now();
         let model = AppModel {
@@ -559,17 +561,57 @@ impl SimpleComponent for AppModel {
             }
         });
 
-        // Background Hyprland Worker (every 300ms)
-        let sender_hypr = sender.clone();
-        let mon_for_hypr = target_monitor;
-        std::thread::spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            let (active_ws, occupied_ws, title) = read_hyprland_state(&mon_for_hypr);
-            sender_hypr.input(AppMsg::UpdateHyprland {
-                active_ws,
-                occupied_ws,
-                title,
-            });
+        // Real-Time Push Event Listener (.socket2.sock)
+        let sender_hypr_event = sender.clone();
+        let mon_for_hypr_event = target_monitor.clone();
+        std::thread::spawn(move || {
+            let runtime =
+                std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run/user/1000".to_string());
+            if let Ok(sig) = std::env::var("HYPRLAND_INSTANCE_SIGNATURE") {
+                let path = format!("{}/hypr/{}/.socket2.sock", runtime, sig);
+                if let Ok(stream) = UnixStream::connect(path) {
+                    let reader = BufReader::new(stream);
+                    for line in reader.lines().map_while(Result::ok) {
+                        if line.starts_with("windowtitle")
+                            || line.starts_with("activewindow")
+                            || line.starts_with("workspace")
+                            || line.starts_with("focusedmon")
+                            || line.starts_with("openwindow")
+                            || line.starts_with("closewindow")
+                            || line.starts_with("movewindow")
+                        {
+                            let (active_ws, occupied_ws, title) =
+                                read_hyprland_state_fast(&mon_for_hypr_event);
+                            sender_hypr_event.input(AppMsg::UpdateHyprland {
+                                active_ws,
+                                occupied_ws,
+                                title,
+                            });
+                        }
+                    }
+                }
+            }
+        });
+
+        // Fast Delta-Checking Fallback Worker (every 40ms)
+        let sender_hypr_fast = sender.clone();
+        let mon_for_hypr_fast = target_monitor;
+        std::thread::spawn(move || {
+            let mut last_title = String::new();
+            let mut last_ws = 0u32;
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(40));
+                let (active_ws, occupied_ws, title) = read_hyprland_state_fast(&mon_for_hypr_fast);
+                if title != last_title || active_ws != last_ws {
+                    last_title = title.clone();
+                    last_ws = active_ws;
+                    sender_hypr_fast.input(AppMsg::UpdateHyprland {
+                        active_ws,
+                        occupied_ws,
+                        title,
+                    });
+                }
+            }
         });
 
         ComponentParts { model, widgets }
@@ -735,45 +777,24 @@ fn read_media() -> Option<(String, String)> {
     Some((status, title))
 }
 
-fn read_hyprland_state(target_monitor: &str) -> (u32, Vec<u32>, String) {
+fn hypr_request(cmd: &[u8]) -> Option<Vec<u8>> {
+    let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run/user/1000".to_string());
+    let sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok()?;
+    let path = format!("{}/hypr/{}/.socket.sock", runtime, sig);
+    let mut stream = UnixStream::connect(path).ok()?;
+    stream.write_all(cmd).ok()?;
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).ok()?;
+    Some(buf)
+}
+
+fn read_hyprland_state_fast(target_monitor: &str) -> (u32, Vec<u32>, String) {
     let mut active_ws = 1u32;
     let mut occupied = Vec::new();
     let mut title = "Desktop".to_string();
 
-    if let Ok(output) = std::process::Command::new("hyprctl")
-        .args(["monitors", "-j"])
-        .output()
-    {
-        if let Ok(monitors) = serde_json::from_slice::<Vec<HyprMonitor>>(&output.stdout) {
-            for m in monitors {
-                if m.name == target_monitor || (m.focused && target_monitor.is_empty()) {
-                    if m.active_workspace.id > 0 {
-                        active_ws = m.active_workspace.id as u32;
-                    }
-                    break;
-                }
-            }
-        }
-    }
-
-    if let Ok(output) = std::process::Command::new("hyprctl")
-        .args(["workspaces", "-j"])
-        .output()
-    {
-        if let Ok(workspaces) = serde_json::from_slice::<Vec<HyprWorkspace>>(&output.stdout) {
-            for ws in workspaces {
-                if ws.id > 0 {
-                    occupied.push(ws.id as u32);
-                }
-            }
-        }
-    }
-
-    if let Ok(output) = std::process::Command::new("hyprctl")
-        .args(["activewindow", "-j"])
-        .output()
-    {
-        if let Ok(win) = serde_json::from_slice::<HyprWindow>(&output.stdout) {
+    if let Some(bytes) = hypr_request(b"j/activewindow") {
+        if let Ok(win) = serde_json::from_slice::<HyprWindow>(&bytes) {
             if let Some(t) = win.title {
                 if !t.trim().is_empty() {
                     title = t.trim().to_string();
@@ -786,16 +807,36 @@ fn read_hyprland_state(target_monitor: &str) -> (u32, Vec<u32>, String) {
         }
     }
 
+    if let Some(bytes) = hypr_request(b"j/monitors") {
+        if let Ok(monitors) = serde_json::from_slice::<Vec<HyprMonitor>>(&bytes) {
+            for m in monitors {
+                if m.name == target_monitor || (m.focused && target_monitor.is_empty()) {
+                    if m.active_workspace.id > 0 {
+                        active_ws = m.active_workspace.id as u32;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    if let Some(bytes) = hypr_request(b"j/workspaces") {
+        if let Ok(workspaces) = serde_json::from_slice::<Vec<HyprWorkspace>>(&bytes) {
+            for ws in workspaces {
+                if ws.id > 0 {
+                    occupied.push(ws.id as u32);
+                }
+            }
+        }
+    }
+
     (active_ws, occupied, title)
 }
 
 fn detect_monitors() -> Vec<String> {
     let mut names = Vec::new();
-    if let Ok(output) = std::process::Command::new("hyprctl")
-        .args(["monitors", "-j"])
-        .output()
-    {
-        if let Ok(monitors) = serde_json::from_slice::<Vec<HyprMonitor>>(&output.stdout) {
+    if let Some(bytes) = hypr_request(b"j/monitors") {
+        if let Ok(monitors) = serde_json::from_slice::<Vec<HyprMonitor>>(&bytes) {
             for m in &monitors {
                 if m.name == "HDMI-A-1" {
                     names.push(m.name.clone());
