@@ -220,8 +220,14 @@ fn media_markup(status: Option<&str>, title: Option<&str>, is_compact: bool) -> 
         } else {
             ("⏸ PAUS", "#5A6042")
         };
+        if is_compact {
+            return format!(
+                "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='{}'>{}</span>",
+                col, icon
+            );
+        }
         let escaped = gtk4::glib::markup_escape_text(t);
-        let max_len = if is_compact { 14 } else { 24 };
+        let max_len = 24;
         let char_count = escaped.chars().count();
         let display = if char_count > max_len {
             let truncated: String = escaped.chars().take(max_len).collect();
