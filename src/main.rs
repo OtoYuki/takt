@@ -27,6 +27,9 @@ struct HyprMonitor {
 }
 
 struct AppModel {
+    _target_monitor: String,
+    ws_base: u32,
+
     time_str: String,
     date_str: String,
     sec_str: String,
@@ -69,7 +72,7 @@ enum AppMsg {
         occupied_ws: Vec<u32>,
         title: String,
     },
-    SwitchWorkspace(u32),
+    SwitchWorkspaceSlot(u32),
     ToggleMute,
     ToggleMedia,
     TriggerPower,
@@ -244,7 +247,7 @@ fn get_ws_classes(active_ws: u32, ws_id: u32, occupied: &[u32]) -> &'static [&'s
 
 #[relm4::component]
 impl SimpleComponent for AppModel {
-    type Init = ();
+    type Init = String;
     type Input = AppMsg;
     type Output = ();
 
@@ -252,7 +255,7 @@ impl SimpleComponent for AppModel {
         #[root]
         gtk4::ApplicationWindow {
             set_title: Some("takt"),
-            set_default_size: (2560, 44),
+            set_default_size: (1600, 44),
             add_css_class: "takt-bar",
 
             gtk4::CenterBox {
@@ -274,34 +277,44 @@ impl SimpleComponent for AppModel {
                         add_css_class: "pod-workspaces",
 
                         gtk4::Button {
-                            set_label: "01",
+                            set_label: if model.ws_base == 6 { "06" } else { "01" },
                             #[watch]
-                            set_css_classes: get_ws_classes(model.active_workspace, 1, &model.occupied_workspaces),
-                            connect_clicked => AppMsg::SwitchWorkspace(1),
+                            set_label: &format!("{:02}", model.ws_base),
+                            #[watch]
+                            set_css_classes: get_ws_classes(model.active_workspace, model.ws_base, &model.occupied_workspaces),
+                            connect_clicked => AppMsg::SwitchWorkspaceSlot(0),
                         },
                         gtk4::Button {
-                            set_label: "02",
+                            set_label: if model.ws_base == 6 { "07" } else { "02" },
                             #[watch]
-                            set_css_classes: get_ws_classes(model.active_workspace, 2, &model.occupied_workspaces),
-                            connect_clicked => AppMsg::SwitchWorkspace(2),
+                            set_label: &format!("{:02}", model.ws_base + 1),
+                            #[watch]
+                            set_css_classes: get_ws_classes(model.active_workspace, model.ws_base + 1, &model.occupied_workspaces),
+                            connect_clicked => AppMsg::SwitchWorkspaceSlot(1),
                         },
                         gtk4::Button {
-                            set_label: "03",
+                            set_label: if model.ws_base == 6 { "08" } else { "03" },
                             #[watch]
-                            set_css_classes: get_ws_classes(model.active_workspace, 3, &model.occupied_workspaces),
-                            connect_clicked => AppMsg::SwitchWorkspace(3),
+                            set_label: &format!("{:02}", model.ws_base + 2),
+                            #[watch]
+                            set_css_classes: get_ws_classes(model.active_workspace, model.ws_base + 2, &model.occupied_workspaces),
+                            connect_clicked => AppMsg::SwitchWorkspaceSlot(2),
                         },
                         gtk4::Button {
-                            set_label: "04",
+                            set_label: if model.ws_base == 6 { "09" } else { "04" },
                             #[watch]
-                            set_css_classes: get_ws_classes(model.active_workspace, 4, &model.occupied_workspaces),
-                            connect_clicked => AppMsg::SwitchWorkspace(4),
+                            set_label: &format!("{:02}", model.ws_base + 3),
+                            #[watch]
+                            set_css_classes: get_ws_classes(model.active_workspace, model.ws_base + 3, &model.occupied_workspaces),
+                            connect_clicked => AppMsg::SwitchWorkspaceSlot(3),
                         },
                         gtk4::Button {
-                            set_label: "05",
+                            set_label: if model.ws_base == 6 { "10" } else { "05" },
                             #[watch]
-                            set_css_classes: get_ws_classes(model.active_workspace, 5, &model.occupied_workspaces),
-                            connect_clicked => AppMsg::SwitchWorkspace(5),
+                            set_label: &format!("{:02}", model.ws_base + 4),
+                            #[watch]
+                            set_css_classes: get_ws_classes(model.active_workspace, model.ws_base + 4, &model.occupied_workspaces),
+                            connect_clicked => AppMsg::SwitchWorkspaceSlot(4),
                         },
                     },
 
@@ -422,10 +435,16 @@ impl SimpleComponent for AppModel {
     }
 
     fn init(
-        _init: Self::Init,
+        target_monitor: Self::Init,
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
+        let ws_base = if target_monitor.starts_with("eDP") {
+            6
+        } else {
+            1
+        };
+
         // Initialize Wayland Layer Shell
         root.init_layer_shell();
         root.set_layer(Layer::Top);
@@ -434,24 +453,18 @@ impl SimpleComponent for AppModel {
         root.set_anchor(Edge::Right, true);
         root.auto_exclusive_zone_enable();
 
-        // Bind explicitly to HDMI-A-1 if present, otherwise fallback to primary monitor
+        // Bind explicitly to the target monitor
         if let Some(display) = gtk4::gdk::Display::default() {
             let monitors = display.monitors();
-            let mut chosen = None;
             for i in 0..monitors.n_items() {
                 if let Some(obj) = monitors.item(i) {
                     if let Ok(m) = obj.downcast::<gtk4::gdk::Monitor>() {
-                        if m.connector().as_deref() == Some("HDMI-A-1") {
-                            chosen = Some(m);
+                        if m.connector().as_deref() == Some(&target_monitor) {
+                            root.set_monitor(&m);
                             break;
-                        } else if chosen.is_none() {
-                            chosen = Some(m);
                         }
                     }
                 }
-            }
-            if let Some(m) = chosen {
-                root.set_monitor(&m);
             }
         }
 
@@ -467,10 +480,13 @@ impl SimpleComponent for AppModel {
         let (media_status, media_title) = read_media()
             .map(|(s, t)| (Some(s), Some(t)))
             .unwrap_or((None, None));
-        let (active_ws, occupied_ws, window_title) = read_hyprland_state();
+        let (active_ws, occupied_ws, window_title) = read_hyprland_state(&target_monitor);
 
         let now = chrono::Local::now();
         let model = AppModel {
+            _target_monitor: target_monitor.clone(),
+            ws_base,
+
             time_str: now.format("%H:%M").to_string(),
             date_str: now.format("%a %d %b").to_string().to_uppercase(),
             sec_str: now.format("%S").to_string(),
@@ -529,11 +545,12 @@ impl SimpleComponent for AppModel {
             }
         });
 
-        // Background Hyprland Worker (every 400ms)
+        // Background Hyprland Worker (every 300ms)
         let sender_hypr = sender.clone();
+        let mon_for_hypr = target_monitor;
         std::thread::spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_millis(400));
-            let (active_ws, occupied_ws, title) = read_hyprland_state();
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            let (active_ws, occupied_ws, title) = read_hyprland_state(&mon_for_hypr);
             sender_hypr.input(AppMsg::UpdateHyprland {
                 active_ws,
                 occupied_ws,
@@ -585,9 +602,10 @@ impl SimpleComponent for AppModel {
                 self.occupied_workspaces = occupied_ws;
                 self.window_title = title;
             }
-            AppMsg::SwitchWorkspace(id) => {
+            AppMsg::SwitchWorkspaceSlot(slot) => {
+                let ws_id = self.ws_base + slot;
                 let _ = std::process::Command::new("hyprctl")
-                    .args(["dispatch", "workspace", &id.to_string()])
+                    .args(["dispatch", "workspace", &ws_id.to_string()])
                     .spawn();
             }
             AppMsg::ToggleMute => {
@@ -703,7 +721,7 @@ fn read_media() -> Option<(String, String)> {
     Some((status, title))
 }
 
-fn read_hyprland_state() -> (u32, Vec<u32>, String) {
+fn read_hyprland_state(target_monitor: &str) -> (u32, Vec<u32>, String) {
     let mut active_ws = 1u32;
     let mut occupied = Vec::new();
     let mut title = "Desktop".to_string();
@@ -714,13 +732,11 @@ fn read_hyprland_state() -> (u32, Vec<u32>, String) {
     {
         if let Ok(monitors) = serde_json::from_slice::<Vec<HyprMonitor>>(&output.stdout) {
             for m in monitors {
-                if m.focused || m.name == "HDMI-A-1" {
+                if m.name == target_monitor || (m.focused && target_monitor.is_empty()) {
                     if m.active_workspace.id > 0 {
                         active_ws = m.active_workspace.id as u32;
                     }
-                    if m.focused {
-                        break;
-                    }
+                    break;
                 }
             }
         }
@@ -759,8 +775,58 @@ fn read_hyprland_state() -> (u32, Vec<u32>, String) {
     (active_ws, occupied, title)
 }
 
-fn main() {
-    let app = RelmApp::new("dev.s1re.takt");
+fn detect_monitors() -> Vec<String> {
+    if let Ok(output) = std::process::Command::new("hyprctl")
+        .args(["monitors", "-j"])
+        .output()
+    {
+        if let Ok(monitors) = serde_json::from_slice::<Vec<HyprMonitor>>(&output.stdout) {
+            let names: Vec<String> = monitors.into_iter().map(|m| m.name).collect();
+            if !names.is_empty() {
+                return names;
+            }
+        }
+    }
+    vec!["HDMI-A-1".to_string()]
+}
+
+fn run_monitor(mon_name: String) {
+    let clean_mon = mon_name.replace(['-', '.'], "_");
+    let app_id = format!("dev.s1re.takt.{}", clean_mon);
+    let app = RelmApp::new(&app_id);
     relm4::set_global_css(include_str!("style.css"));
-    app.run::<AppModel>(());
+    app.run::<AppModel>(mon_name);
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let mut target_monitor = None;
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--monitor" && i + 1 < args.len() {
+            target_monitor = Some(args[i + 1].clone());
+            i += 1;
+        }
+        i += 1;
+    }
+
+    if let Some(mon_name) = target_monitor {
+        run_monitor(mon_name);
+    } else {
+        let monitors = detect_monitors();
+        if monitors.len() <= 1 {
+            let mon_name = monitors
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| "HDMI-A-1".to_string());
+            run_monitor(mon_name);
+        } else {
+            let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("takt"));
+            for mon in monitors {
+                let _ = std::process::Command::new(&exe)
+                    .args(["--monitor", &mon])
+                    .spawn();
+            }
+        }
+    }
 }
