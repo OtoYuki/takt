@@ -74,6 +74,7 @@ enum AppMsg {
         active_ws: u32,
         occupied_ws: Vec<u32>,
         title: String,
+        ws_base: u32,
     },
     SwitchWorkspaceSlot(u32),
     ToggleMute,
@@ -288,7 +289,7 @@ impl SimpleComponent for AppModel {
                         add_css_class: "pod-workspaces",
 
                         gtk4::Button {
-                            set_label: if model.ws_base == 6 { "06" } else { "01" },
+                            set_label: &format!("{:02}", model.ws_base),
                             #[watch]
                             set_label: &format!("{:02}", model.ws_base),
                             #[watch]
@@ -296,7 +297,7 @@ impl SimpleComponent for AppModel {
                             connect_clicked => AppMsg::SwitchWorkspaceSlot(0),
                         },
                         gtk4::Button {
-                            set_label: if model.ws_base == 6 { "07" } else { "02" },
+                            set_label: &format!("{:02}", model.ws_base + 1),
                             #[watch]
                             set_label: &format!("{:02}", model.ws_base + 1),
                             #[watch]
@@ -304,7 +305,7 @@ impl SimpleComponent for AppModel {
                             connect_clicked => AppMsg::SwitchWorkspaceSlot(1),
                         },
                         gtk4::Button {
-                            set_label: if model.ws_base == 6 { "08" } else { "03" },
+                            set_label: &format!("{:02}", model.ws_base + 2),
                             #[watch]
                             set_label: &format!("{:02}", model.ws_base + 2),
                             #[watch]
@@ -312,7 +313,7 @@ impl SimpleComponent for AppModel {
                             connect_clicked => AppMsg::SwitchWorkspaceSlot(2),
                         },
                         gtk4::Button {
-                            set_label: if model.ws_base == 6 { "09" } else { "04" },
+                            set_label: &format!("{:02}", model.ws_base + 3),
                             #[watch]
                             set_label: &format!("{:02}", model.ws_base + 3),
                             #[watch]
@@ -320,7 +321,7 @@ impl SimpleComponent for AppModel {
                             connect_clicked => AppMsg::SwitchWorkspaceSlot(3),
                         },
                         gtk4::Button {
-                            set_label: if model.ws_base == 6 { "10" } else { "05" },
+                            set_label: &format!("{:02}", model.ws_base + 4),
                             #[watch]
                             set_label: &format!("{:02}", model.ws_base + 4),
                             #[watch]
@@ -450,11 +451,6 @@ impl SimpleComponent for AppModel {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        let ws_base = if target_monitor.starts_with("eDP") {
-            6
-        } else {
-            1
-        };
         let is_compact = target_monitor.starts_with("eDP");
         if is_compact {
             root.add_css_class("compact");
@@ -495,7 +491,8 @@ impl SimpleComponent for AppModel {
         let (media_status, media_title) = read_media()
             .map(|(s, t)| (Some(s), Some(t)))
             .unwrap_or((None, None));
-        let (active_ws, occupied_ws, window_title) = read_hyprland_state_fast(&target_monitor);
+        let (active_ws, occupied_ws, window_title, ws_base) =
+            read_hyprland_state_fast(&target_monitor);
 
         let now = chrono::Local::now();
         let model = AppModel {
@@ -572,6 +569,20 @@ impl SimpleComponent for AppModel {
                 if let Ok(stream) = UnixStream::connect(path) {
                     let reader = BufReader::new(stream);
                     for line in reader.lines().map_while(Result::ok) {
+                        if line.starts_with("monitoradded>>") {
+                            let added_mon = line.trim_start_matches("monitoradded>>").trim();
+                            if !added_mon.is_empty() && added_mon != mon_for_hypr_event {
+                                let exe = std::env::current_exe()
+                                    .unwrap_or_else(|_| std::path::PathBuf::from("takt"));
+                                let _ = std::process::Command::new(&exe)
+                                    .args(["--monitor", added_mon])
+                                    .stdin(std::process::Stdio::null())
+                                    .stdout(std::process::Stdio::null())
+                                    .stderr(std::process::Stdio::null())
+                                    .spawn();
+                            }
+                        }
+
                         if line.starts_with("windowtitle")
                             || line.starts_with("activewindow")
                             || line.starts_with("workspace")
@@ -579,13 +590,16 @@ impl SimpleComponent for AppModel {
                             || line.starts_with("openwindow")
                             || line.starts_with("closewindow")
                             || line.starts_with("movewindow")
+                            || line.starts_with("monitoradded")
+                            || line.starts_with("monitorremoved")
                         {
-                            let (active_ws, occupied_ws, title) =
+                            let (active_ws, occupied_ws, title, ws_base) =
                                 read_hyprland_state_fast(&mon_for_hypr_event);
                             sender_hypr_event.input(AppMsg::UpdateHyprland {
                                 active_ws,
                                 occupied_ws,
                                 title,
+                                ws_base,
                             });
                         }
                     }
@@ -599,16 +613,20 @@ impl SimpleComponent for AppModel {
         std::thread::spawn(move || {
             let mut last_title = String::new();
             let mut last_ws = 0u32;
+            let mut last_ws_base = 0u32;
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(40));
-                let (active_ws, occupied_ws, title) = read_hyprland_state_fast(&mon_for_hypr_fast);
-                if title != last_title || active_ws != last_ws {
+                let (active_ws, occupied_ws, title, ws_base) =
+                    read_hyprland_state_fast(&mon_for_hypr_fast);
+                if title != last_title || active_ws != last_ws || ws_base != last_ws_base {
                     last_title = title.clone();
                     last_ws = active_ws;
+                    last_ws_base = ws_base;
                     sender_hypr_fast.input(AppMsg::UpdateHyprland {
                         active_ws,
                         occupied_ws,
                         title,
+                        ws_base,
                     });
                 }
             }
@@ -653,10 +671,12 @@ impl SimpleComponent for AppModel {
                 active_ws,
                 occupied_ws,
                 title,
+                ws_base,
             } => {
                 self.active_workspace = active_ws;
                 self.occupied_workspaces = occupied_ws;
                 self.window_title = title;
+                self.ws_base = ws_base;
             }
             AppMsg::SwitchWorkspaceSlot(slot) => {
                 let ws_id = self.ws_base + slot;
@@ -788,10 +808,35 @@ fn hypr_request(cmd: &[u8]) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-fn read_hyprland_state_fast(target_monitor: &str) -> (u32, Vec<u32>, String) {
+fn compute_ws_base(
+    target_monitor: &str,
+    num_monitors: usize,
+    has_external: bool,
+    active_ws: u32,
+) -> u32 {
+    let is_internal = target_monitor.starts_with("eDP");
+    let is_dual = num_monitors > 1 && has_external;
+
+    if is_dual {
+        if is_internal {
+            6
+        } else {
+            1
+        }
+    } else if active_ws >= 6 {
+        ((active_ws - 1) / 5) * 5 + 1
+    } else {
+        1
+    }
+}
+
+fn read_hyprland_state_fast(target_monitor: &str) -> (u32, Vec<u32>, String, u32) {
     let mut active_ws = 1u32;
     let mut occupied = Vec::new();
     let mut title = "Desktop".to_string();
+    let mut num_monitors = 0;
+    let mut has_external = false;
+    let mut target_found = false;
 
     if let Some(bytes) = hypr_request(b"j/activewindow") {
         if let Ok(win) = serde_json::from_slice::<HyprWindow>(&bytes) {
@@ -809,8 +854,11 @@ fn read_hyprland_state_fast(target_monitor: &str) -> (u32, Vec<u32>, String) {
 
     if let Some(bytes) = hypr_request(b"j/monitors") {
         if let Ok(monitors) = serde_json::from_slice::<Vec<HyprMonitor>>(&bytes) {
-            for m in monitors {
+            num_monitors = monitors.len();
+            has_external = monitors.iter().any(|m| !m.name.starts_with("eDP"));
+            for m in &monitors {
                 if m.name == target_monitor || (m.focused && target_monitor.is_empty()) {
+                    target_found = true;
                     if m.active_workspace.id > 0 {
                         active_ws = m.active_workspace.id as u32;
                     }
@@ -818,6 +866,15 @@ fn read_hyprland_state_fast(target_monitor: &str) -> (u32, Vec<u32>, String) {
                 }
             }
         }
+    }
+
+    if num_monitors > 0
+        && !target_found
+        && !target_monitor.is_empty()
+        && !target_monitor.starts_with("eDP")
+    {
+        // External monitor was disconnected - exit this secondary bar instance
+        std::process::exit(0);
     }
 
     if let Some(bytes) = hypr_request(b"j/workspaces") {
@@ -830,7 +887,9 @@ fn read_hyprland_state_fast(target_monitor: &str) -> (u32, Vec<u32>, String) {
         }
     }
 
-    (active_ws, occupied, title)
+    let ws_base = compute_ws_base(target_monitor, num_monitors, has_external, active_ws);
+
+    (active_ws, occupied, title, ws_base)
 }
 
 fn detect_monitors() -> Vec<String> {
@@ -838,19 +897,19 @@ fn detect_monitors() -> Vec<String> {
     if let Some(bytes) = hypr_request(b"j/monitors") {
         if let Ok(monitors) = serde_json::from_slice::<Vec<HyprMonitor>>(&bytes) {
             for m in &monitors {
-                if m.name == "HDMI-A-1" {
+                if !m.name.starts_with("eDP") {
                     names.push(m.name.clone());
                 }
             }
             for m in monitors {
-                if m.name != "HDMI-A-1" {
+                if m.name.starts_with("eDP") {
                     names.push(m.name);
                 }
             }
         }
     }
     if names.is_empty() {
-        names.push("HDMI-A-1".to_string());
+        names.push("eDP-2".to_string());
     }
     names
 }
@@ -880,7 +939,7 @@ fn main() {
     } else {
         let mut monitors = detect_monitors();
         if monitors.is_empty() {
-            monitors.push("HDMI-A-1".to_string());
+            monitors.push("eDP-2".to_string());
         }
         let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("takt"));
         for mon in monitors.iter().skip(1) {
@@ -892,5 +951,45 @@ fn main() {
                 .spawn();
         }
         run_monitor(monitors[0].clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_single_monitor_laptop_starts_at_one() {
+        // When laptop screen is the only monitor (monitor unplugged) and on workspace 1..5
+        assert_eq!(compute_ws_base("eDP-2", 1, false, 1), 1);
+        assert_eq!(compute_ws_base("eDP-2", 1, false, 3), 1);
+        assert_eq!(compute_ws_base("eDP-2", 1, false, 5), 1);
+    }
+
+    #[test]
+    fn test_single_monitor_laptop_switches_to_upper_bank() {
+        // When laptop screen is the only monitor and active workspace is in 6..10
+        assert_eq!(compute_ws_base("eDP-2", 1, false, 6), 6);
+        assert_eq!(compute_ws_base("eDP-2", 1, false, 8), 6);
+        assert_eq!(compute_ws_base("eDP-2", 1, false, 10), 6);
+    }
+
+    #[test]
+    fn test_dual_monitor_modes() {
+        // When both external monitor and laptop monitor are connected
+        // External monitor always starts at 1
+        assert_eq!(compute_ws_base("HDMI-A-1", 2, true, 1), 1);
+        assert_eq!(compute_ws_base("DP-1", 2, true, 2), 1);
+
+        // Laptop monitor in dual-monitor mode always starts at 6
+        assert_eq!(compute_ws_base("eDP-2", 2, true, 6), 6);
+        assert_eq!(compute_ws_base("eDP-2", 2, true, 1), 6);
+    }
+
+    #[test]
+    fn test_single_external_monitor() {
+        // When only external monitor is connected (e.g. laptop lid closed)
+        assert_eq!(compute_ws_base("HDMI-A-1", 1, true, 1), 1);
+        assert_eq!(compute_ws_base("HDMI-A-1", 1, true, 7), 6);
     }
 }
