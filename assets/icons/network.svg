@@ -1,17 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <!-- Dot-Matrix Technical Signal Radar (4 Tiered Columns) -->
-  <!-- Col 1 (Low) -->
-  <circle cx="2" cy="13.5" r="1.15" fill="#999208"/>
-  <!-- Col 2 -->
-  <circle cx="6" cy="13.5" r="1.15" fill="#999208"/>
-  <circle cx="6" cy="9.5" r="1.15" fill="#999208"/>
-  <!-- Col 3 -->
-  <circle cx="10" cy="13.5" r="1.15" fill="#999208"/>
-  <circle cx="10" cy="9.5" r="1.15" fill="#999208"/>
-  <circle cx="10" cy="5.5" r="1.15" fill="#999208"/>
-  <!-- Col 4 (High) -->
-  <circle cx="14" cy="13.5" r="1.15" fill="#999208"/>
-  <circle cx="14" cy="9.5" r="1.15" fill="#999208"/>
-  <circle cx="14" cy="5.5" r="1.15" fill="#999208"/>
-  <circle cx="14" cy="1.5" r="1.15" fill="#999208"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" width="14" height="14">
+  <!-- Pixel-Perfect Stepped Technical Signal Towers (1:1 Pixel Grid) -->
+  <rect x="1" y="10" width="2" height="3" fill="#999208"/>
+  <rect x="4" y="7" width="2" height="6" fill="#999208"/>
+  <rect x="7" y="4" width="2" height="9" fill="#999208"/>
+  <rect x="10" y="1" width="2" height="12" fill="#999208"/>
 </svg>

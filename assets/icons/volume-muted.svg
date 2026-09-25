@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <!-- Mechanical Transducer Horn (Muted Tone) -->
-  <polygon points="1.5,5.5 4.5,5.5 8.5,2 8.5,14 4.5,10.5 1.5,10.5" fill="#5A6042"/>
-  <!-- Hazard Vermilion Cut Slash -->
-  <line x1="10.5" y1="5" x2="15" y2="11" stroke="#BE5D3C" stroke-width="1.5"/>
-  <line x1="15" y1="5" x2="10.5" y2="11" stroke="#BE5D3C" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" width="14" height="14">
+  <!-- Muted Transducer Body -->
+  <polygon points="1,4.5 4,4.5 7.5,1.5 7.5,12.5 4,9.5 1,9.5" fill="#5A6042"/>
+  <!-- Hazard Vermilion Mute Strike -->
+  <line x1="9.5" y1="4.5" x2="13.5" y2="9.5" stroke="#BE5D3C" stroke-width="1.5"/>
+  <line x1="13.5" y1="4.5" x2="9.5" y2="9.5" stroke="#BE5D3C" stroke-width="1.5"/>
 </svg>

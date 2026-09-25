@@ -1,14 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <!-- Cassette Tape Shell (0px corners) -->
-  <rect x="1" y="2.5" width="14" height="11" fill="#172213" stroke="#D1CF8B" stroke-width="1.25"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" width="14" height="14">
+  <!-- Cassette Housing -->
+  <rect x="0.5" y="2" width="13" height="10" fill="#172213" stroke="#D1CF8B" stroke-width="1"/>
   <!-- Tape Window -->
-  <rect x="3.5" y="5.5" width="9" height="5" fill="#141C10" stroke="#5A6042" stroke-width="0.8"/>
-  <!-- Left Spool Reel with Drive Teeth -->
-  <circle cx="5.5" cy="8" r="1.75" fill="#D8A664"/>
-  <circle cx="5.5" cy="8" r="0.75" fill="#141C10"/>
-  <!-- Right Spool Reel with Drive Teeth -->
-  <circle cx="10.5" cy="8" r="1.75" fill="#D8A664"/>
-  <circle cx="10.5" cy="8" r="0.75" fill="#141C10"/>
+  <rect x="2.5" y="4.5" width="9" height="5" fill="#141C10" stroke="#5A6042" stroke-width="0.8"/>
+  <!-- Left Spool -->
+  <circle cx="4.5" cy="7" r="1.5" fill="#D8A664"/>
+  <circle cx="4.5" cy="7" r="0.6" fill="#141C10"/>
+  <!-- Right Spool -->
+  <circle cx="9.5" cy="7" r="1.5" fill="#D8A664"/>
+  <circle cx="9.5" cy="7" r="0.6" fill="#141C10"/>
   <!-- Tape Bridge -->
-  <line x1="5.5" y1="8" x2="10.5" y2="8" stroke="#999208" stroke-width="1"/>
+  <line x1="4.5" y1="7" x2="9.5" y2="7" stroke="#999208" stroke-width="1"/>
 </svg>

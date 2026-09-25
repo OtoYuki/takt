@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <!-- Dot-Matrix Flanking Transceivers -->
-  <circle cx="2.5" cy="8" r="1.1" fill="#D8A664"/>
-  <circle cx="13.5" cy="8" r="1.1" fill="#D8A664"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" width="14" height="14">
+  <!-- Flanking Transceiver Beads -->
+  <rect x="1" y="6" width="1.5" height="2" fill="#D8A664"/>
+  <rect x="11.5" y="6" width="1.5" height="2" fill="#D8A664"/>
   <!-- Nordic Technical Antenna Rune -->
-  <line x1="8" y1="1.5" x2="8" y2="14.5" stroke="#999208" stroke-width="1.5"/>
-  <polyline points="8,1.5 12,5 4,11" fill="none" stroke="#999208" stroke-width="1.5" stroke-linejoin="miter"/>
-  <polyline points="8,14.5 12,11 4,5" fill="none" stroke="#999208" stroke-width="1.5" stroke-linejoin="miter"/>
+  <line x1="7" y1="1" x2="7" y2="13" stroke="#999208" stroke-width="1.5"/>
+  <polyline points="7,1 11,4 3,9" fill="none" stroke="#999208" stroke-width="1.5" stroke-linejoin="miter"/>
+  <polyline points="7,13 11,10 3,5" fill="none" stroke="#999208" stroke-width="1.5" stroke-linejoin="miter"/>
 </svg>

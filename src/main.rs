@@ -228,15 +228,10 @@ fn cpu_perf_markup(cpu: f32, temp: Option<u32>) -> String {
     };
     let bars = meter_bars_4(cpu, color, "#28341f");
     let temp_str = temp
-        .map(|t| {
-            format!(
-                " <span font_family='Geist Pixel Circle' foreground='#FBFFE1'>{}°C</span>",
-                t
-            )
-        })
+        .map(|t| format!(" <span font_family='Geist Mono' font_weight='bold' foreground='#FBFFE1'>{}°C</span>", t))
         .unwrap_or_default();
     format!(
-        "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#999208'>CPU //</span> <span font_family='Geist Pixel Circle' font_weight='bold' font_size='9pt' foreground='{}'>{:>2.0}%</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span>{}",
+        "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#999208'>CPU //</span> <span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='{}'>{:>2.0}%</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span>{}",
         color, cpu, bars, temp_str
     )
 }
@@ -251,7 +246,7 @@ fn mem_perf_markup(mem: f32, used_gb: f32, total_gb: f32) -> String {
     };
     let bars = meter_bars_4(mem, color, "#28341f");
     format!(
-        "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#999208'>RAM //</span> <span font_family='Geist Pixel Circle' font_weight='bold' font_size='9pt' foreground='#FBFFE1'>{:.1}/{:.0}G</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span>",
+        "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#999208'>RAM //</span> <span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#FBFFE1'>{:.1}/{:.0}G</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span>",
         used_gb, total_gb, bars
     )
 }
@@ -272,7 +267,7 @@ fn gpu_perf_markup(
         };
         let bars = meter_bars_4(u as f32, color, "#28341f");
         format!(
-            "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#D8A664'>GPU //</span> <span font_family='Geist Pixel Circle' font_weight='bold' font_size='9pt' foreground='{}'>{:>2}%</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span> <span font_family='Geist Pixel Circle' font_size='8.5pt' foreground='#D1CF8B'>{:.1}/{:.0}G</span> <span font_family='Geist Pixel Circle' font_size='8.5pt' foreground='#FBFFE1'>{}°C</span>",
+            "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#D8A664'>GPU //</span> <span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='{}'>{:>2}%</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span> <span font_family='Geist Mono' font_size='8.5pt' foreground='#D1CF8B'>{:.1}/{:.0}G</span> <span font_family='Geist Mono' font_size='8.5pt' foreground='#FBFFE1'>{}°C</span>",
             color,
             u,
             bars,
@@ -294,7 +289,7 @@ fn disk_perf_markup(used_pct: u32, free_gb: u32) -> String {
         "#D1CF8B"
     };
     format!(
-        "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#999208'>NVME //</span> <span font_family='Geist Pixel Circle' font_weight='bold' font_size='9pt' foreground='{}'>{}%</span> <span font_family='Geist Mono' font_size='8.5pt' foreground='#5A6042'>({}G FREE)</span>",
+        "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#999208'>NVME //</span> <span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='{}'>{}%</span> <span font_family='Geist Mono' font_size='8.5pt' foreground='#5A6042'>({}G FREE)</span>",
         color, used_pct, free_gb
     )
 }
@@ -382,7 +377,7 @@ fn bat_markup(cap: u32, status: &str) -> String {
         format!("{}%", cap)
     };
     format!(
-        "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='8.5pt' foreground='{}'>{}</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span>",
+        "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='{}'>{}</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span>",
         color, tag, bars
     )
 }
@@ -404,25 +399,25 @@ fn network_markup(
                 )
             } else if let Some(q) = quality {
                 format!(
-                    "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='9pt' foreground='#999208'>{:>2}%</span>",
+                    "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#999208'>{:>2}%</span>",
                     q
                 )
             } else {
-                "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='8.5pt' foreground='#999208'>WIFI</span>".to_string()
+                "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#999208'>WIFI</span>".to_string()
             }
         }
         "ETH" => {
-            "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='8.5pt' foreground='#999208'>ETH</span>".to_string()
+            "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#999208'>ETH</span>".to_string()
         }
         _ => {
-            "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='8.5pt' foreground='#BE5D3C'>OFF</span>".to_string()
+            "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#BE5D3C'>OFF</span>".to_string()
         }
     }
 }
 
 fn bluetooth_markup(powered: bool, device: Option<&str>, is_compact: bool) -> String {
     if !powered {
-        "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='8.5pt' foreground='#3e4832'>BT OFF</span>".to_string()
+        "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#3e4832'>BT OFF</span>".to_string()
     } else if let Some(dev) = device {
         let max_len = if is_compact { 7 } else { 11 };
         let name: String = dev.chars().take(max_len).collect();
@@ -431,16 +426,16 @@ fn bluetooth_markup(powered: bool, device: Option<&str>, is_compact: bool) -> St
             name
         )
     } else {
-        "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='8.5pt' foreground='#999208'>BT ON</span>".to_string()
+        "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#999208'>BT ON</span>".to_string()
     }
 }
 
 fn volume_markup(vol: u32, muted: bool) -> String {
     if muted {
-        "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='8.5pt' foreground='#BE5D3C'>MUTE</span>".to_string()
+        "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#BE5D3C'>MUTE</span>".to_string()
     } else {
         format!(
-            "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='9pt' foreground='#D8A664'>{:>2}%</span>",
+            "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#D8A664'>{:>2}%</span>",
             vol
         )
     }
@@ -452,7 +447,7 @@ fn power_markup() -> &'static str {
 
 fn clock_markup(time: &str, date: &str) -> String {
     format!(
-        "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='11pt' foreground='#FBFFE1'>{}</span> <span font_family='Geist Mono' font_size='8.5pt' foreground='#38462b'>│</span> <span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='1500' foreground='#D1CF8B'>{}</span>",
+        "<span font_family='Freigeist' font_weight='800' font_size='11.5pt' foreground='#FBFFE1'>{}</span> <span font_family='Geist Mono' font_size='8.5pt' foreground='#38462b'>│</span> <span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='1500' foreground='#D1CF8B'>{}</span>",
         time, date
     )
 }
@@ -624,7 +619,7 @@ impl SimpleComponent for AppModel {
 
                         gtk4::Image {
                             set_from_file: get_asset_path("icons/window.svg").as_deref(),
-                            set_pixel_size: 13,
+                            set_pixel_size: 14,
                         },
                         gtk4::Label {
                             set_markup: &window_title_markup(&model.window_title, model.is_compact),
@@ -680,7 +675,7 @@ impl SimpleComponent for AppModel {
 
                             gtk4::Image {
                                 set_from_file: get_asset_path("icons/cpu.svg").as_deref(),
-                                set_pixel_size: 13,
+                                set_pixel_size: 14,
                             },
                             gtk4::Label {
                                 #[watch]
@@ -698,7 +693,7 @@ impl SimpleComponent for AppModel {
 
                             gtk4::Image {
                                 set_from_file: get_asset_path("icons/memory.svg").as_deref(),
-                                set_pixel_size: 13,
+                                set_pixel_size: 14,
                             },
                             gtk4::Label {
                                 #[watch]
@@ -743,7 +738,7 @@ impl SimpleComponent for AppModel {
                             add_css_class: "pod-perf-cell",
 
                             gtk4::Image {
-                                set_pixel_size: 13,
+                                set_pixel_size: 14,
                                 #[watch]
                                 set_from_file: get_asset_path(if model.bat_status == "Charging" { "icons/battery-charging.svg" } else { "icons/battery.svg" }).as_deref(),
                             },
@@ -924,7 +919,7 @@ impl SimpleComponent for AppModel {
                             set_css_classes: if model.current_screen == DeckScreen::Sys { &["deck-chip", "active"] } else { &["deck-chip", "idle"] },
                             connect_clicked => AppMsg::SetDeckScreen(DeckScreen::Sys),
                             gtk4::Label {
-                                set_markup: "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='8pt'>01 SYS</span>",
+                                set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='800'>01 SYS</span>",
                             }
                         },
                         gtk4::Button {
@@ -932,7 +927,7 @@ impl SimpleComponent for AppModel {
                             set_css_classes: if model.current_screen == DeckScreen::Perf { &["deck-chip", "active"] } else { &["deck-chip", "idle"] },
                             connect_clicked => AppMsg::SetDeckScreen(DeckScreen::Perf),
                             gtk4::Label {
-                                set_markup: "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='8pt'>02 PERF</span>",
+                                set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='800'>02 PERF</span>",
                             }
                         },
                         gtk4::Button {
@@ -940,7 +935,7 @@ impl SimpleComponent for AppModel {
                             set_css_classes: if model.current_screen == DeckScreen::Cal { &["deck-chip", "active"] } else { &["deck-chip", "idle"] },
                             connect_clicked => AppMsg::SetDeckScreen(DeckScreen::Cal),
                             gtk4::Label {
-                                set_markup: "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='8pt'>03 CAL</span>",
+                                set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='800'>03 CAL</span>",
                             }
                         },
                         gtk4::Button {
@@ -948,7 +943,7 @@ impl SimpleComponent for AppModel {
                             set_css_classes: if model.current_screen == DeckScreen::Media { &["deck-chip", "active"] } else { &["deck-chip", "idle"] },
                             connect_clicked => AppMsg::SetDeckScreen(DeckScreen::Media),
                             gtk4::Label {
-                                set_markup: "<span font_family='Geist Pixel Circle' font_weight='bold' font_size='8pt'>04 MEDIA</span>",
+                                set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='800'>04 MEDIA</span>",
                             }
                         },
                     },
@@ -967,7 +962,7 @@ impl SimpleComponent for AppModel {
 
                             gtk4::Image {
                                 set_from_file: get_asset_path("icons/bluetooth.svg").as_deref(),
-                                set_pixel_size: 13,
+                                set_pixel_size: 14,
                             },
                             gtk4::Label {
                                 #[watch]
@@ -1033,7 +1028,7 @@ impl SimpleComponent for AppModel {
                                     gtk4::Label {
                                         #[watch]
                                         set_markup: &format!(
-                                            "<span font_family='Geist Pixel Circle' font_size='8pt' foreground='{}'>STATUS: {}</span>",
+                                            "<span font_family='Geist Mono' font_weight='bold' font_size='8pt' foreground='{}'>STATUS: {}</span>",
                                             if model.bluetooth_powered { "#FBFFE1" } else { "#BE5D3C" },
                                             if !model.bluetooth_powered {
                                                 "POWERED OFF".to_string()
@@ -1080,7 +1075,7 @@ impl SimpleComponent for AppModel {
 
                             gtk4::Image {
                                 set_from_file: get_asset_path("icons/network.svg").as_deref(),
-                                set_pixel_size: 13,
+                                set_pixel_size: 14,
                             },
                             gtk4::Label {
                                 #[watch]
@@ -1167,7 +1162,7 @@ impl SimpleComponent for AppModel {
                                         set_halign: gtk4::Align::Start,
                                         #[watch]
                                         set_markup: &format!(
-                                            "<span font_family='Geist Mono' font_weight='bold' font_size='8.5pt' foreground='#FBFFE1'>ACTIVE: {}</span> <span font_family='Geist Pixel Circle' font_size='8pt' foreground='#999208'>({}%)</span>",
+                                            "<span font_family='Geist Mono' font_weight='bold' font_size='8.5pt' foreground='#FBFFE1'>ACTIVE: {}</span> <span font_family='Geist Mono' font_weight='bold' font_size='8pt' foreground='#999208'>({}%)</span>",
                                             model.net_ssid.as_deref().unwrap_or(""),
                                             model.net_quality.unwrap_or(0)
                                         ),
@@ -1270,7 +1265,7 @@ impl SimpleComponent for AppModel {
                             set_valign: gtk4::Align::Center,
 
                             gtk4::Image {
-                                set_pixel_size: 13,
+                                set_pixel_size: 14,
                                 #[watch]
                                 set_from_file: get_asset_path(if model.vol_muted { "icons/volume-muted.svg" } else { "icons/volume.svg" }).as_deref(),
                             },
@@ -1295,7 +1290,7 @@ impl SimpleComponent for AppModel {
 
                                 gtk4::Label {
                                     #[watch]
-                                    set_markup: &format!("<span font_family='Geist Pixel Circle' font_weight='bold' font_size='13pt' foreground='#FBFFE1'>{}%</span>", model.vol_level),
+                                    set_markup: &format!("<span font_family='Geist Mono' font_weight='bold' font_size='13pt' foreground='#FBFFE1'>{}%</span>", model.vol_level),
                                 },
 
                                 gtk4::Box {
@@ -1306,22 +1301,22 @@ impl SimpleComponent for AppModel {
                                     gtk4::Button {
                                         add_css_class: "quick-vol-btn",
                                         connect_clicked => AppMsg::AdjustVolume(-10),
-                                        gtk4::Label { set_markup: "<span font_family='Geist Pixel Circle' font_size='8pt'>-10%</span>" },
+                                        gtk4::Label { set_markup: "<span font_family='Geist Mono' font_size='8pt'>-10%</span>" },
                                     },
                                     gtk4::Button {
                                         add_css_class: "quick-vol-btn",
                                         connect_clicked => AppMsg::AdjustVolume(-5),
-                                        gtk4::Label { set_markup: "<span font_family='Geist Pixel Circle' font_size='8pt'>-5%</span>" },
+                                        gtk4::Label { set_markup: "<span font_family='Geist Mono' font_size='8pt'>-5%</span>" },
                                     },
                                     gtk4::Button {
                                         add_css_class: "quick-vol-btn",
                                         connect_clicked => AppMsg::AdjustVolume(5),
-                                        gtk4::Label { set_markup: "<span font_family='Geist Pixel Circle' font_size='8pt'>+5%</span>" },
+                                        gtk4::Label { set_markup: "<span font_family='Geist Mono' font_size='8pt'>+5%</span>" },
                                     },
                                     gtk4::Button {
                                         add_css_class: "quick-vol-btn",
                                         connect_clicked => AppMsg::AdjustVolume(10),
-                                        gtk4::Label { set_markup: "<span font_family='Geist Pixel Circle' font_size='8pt'>+10%</span>" },
+                                        gtk4::Label { set_markup: "<span font_family='Geist Mono' font_size='8pt'>+10%</span>" },
                                     },
                                 },
 
