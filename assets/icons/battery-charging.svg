@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <rect x="1" y="3.5" width="12" height="9" rx="1.5" fill="#1c2517" stroke="#D1CF8B" stroke-width="1.5"/>
+  <path d="M 13.5,6 L 15,6 Q 15.5,6 15.5,6.5 L 15.5,9.5 Q 15.5,10 15,10 L 13.5,10 Z" fill="#D1CF8B"/>
+  <!-- Bold Lightning Bolt -->
+  <polygon points="7.5,2 3.5,8 7,8 5.5,13.5 11.5,7 8,7" fill="#D8A664"/>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- 4-Bar Stepped Technical Signal Towers (Bold 2.5px wide) -->
+  <rect x="1.5" y="11" width="2.5" height="4" rx="0.5" fill="#999208"/>
+  <rect x="5" y="8" width="2.5" height="7" rx="0.5" fill="#999208"/>
+  <rect x="8.5" y="5" width="2.5" height="10" rx="0.5" fill="#999208"/>
+  <rect x="12" y="2" width="2.5" height="13" rx="0.5" fill="#999208"/>
+</svg>

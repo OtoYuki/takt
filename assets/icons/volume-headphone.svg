@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Headband Arc (Bold 2px) -->
+  <path d="M 2.5,9 C 2.5,3.5 13.5,3.5 13.5,9" fill="none" stroke="#D8A664" stroke-width="2" stroke-linecap="round"/>
+  <!-- Left Ear Cup -->
+  <rect x="1" y="8" width="3" height="6" rx="1.5" fill="#999208" stroke="#D1CF8B" stroke-width="1"/>
+  <!-- Right Ear Cup -->
+  <rect x="12" y="8" width="3" height="6" rx="1.5" fill="#999208" stroke="#D1CF8B" stroke-width="1"/>
+</svg>

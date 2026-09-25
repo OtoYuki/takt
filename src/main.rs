@@ -1,8 +1,9 @@
 use gtk4::prelude::*;
-use gtk4_layer_shell::{Edge, Layer, LayerShell};
+use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use relm4::prelude::*;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(serde::Deserialize)]
 struct HyprWindow {
@@ -28,48 +29,119 @@ struct HyprMonitor {
     active_workspace: HyprMonActiveWs,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeckScreen {
+    Sys = 1,
+    Perf = 2,
+    Cal = 3,
+    Media = 4,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtDeviceInfo {
+    pub mac: String,
+    pub name: String,
+    pub connected: bool,
+    pub paired: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WifiNetworkInfo {
+    pub in_use: bool,
+    pub ssid: String,
+    pub signal: u32,
+    pub security: String,
+    pub is_known: bool,
+}
+
 struct AppModel {
     _target_monitor: String,
     ws_base: u32,
     is_compact: bool,
+    current_screen: DeckScreen,
 
     time_str: String,
     date_str: String,
-    sec_str: String,
-    sec_tick: bool,
+    week_ribbon: String,
+    week_stats: String,
 
     active_workspace: u32,
     occupied_workspaces: Vec<u32>,
     window_title: String,
 
     cpu_usage: f32,
+    cpu_temp: Option<u32>,
     mem_usage: f32,
+    mem_used_gb: f32,
+    mem_total_gb: f32,
+
+    gpu_usage: Option<u32>,
+    gpu_vram_used_mb: Option<u32>,
+    gpu_vram_total_mb: Option<u32>,
+    gpu_temp: Option<u32>,
+
+    disk_used_pct: u32,
+    disk_free_gb: u32,
+
     vol_level: u32,
     vol_muted: bool,
     bat_capacity: u32,
     bat_status: String,
     net_quality: Option<u32>,
     net_type: String,
+    net_ssid: Option<String>,
+
+    bluetooth_powered: bool,
+    bluetooth_device: Option<String>,
+    bt_devices: Vec<BtDeviceInfo>,
+    bt_scanning: bool,
+    bt_dirty: AtomicBool,
+
+    wifi_radio_on: bool,
+    wifi_networks: Vec<WifiNetworkInfo>,
+    wifi_scanning: bool,
+    wifi_selected_ssid: Option<String>,
+    wifi_status_msg: Option<String>,
+    wifi_dirty: AtomicBool,
 
     media_status: Option<String>,
     media_title: Option<String>,
+    media_artist: Option<String>,
+    media_player: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct TelemetryData {
+    cpu: f32,
+    cpu_temp: Option<u32>,
+    mem: f32,
+    mem_used_gb: f32,
+    mem_total_gb: f32,
+    gpu_usage: Option<u32>,
+    gpu_vram_used_mb: Option<u32>,
+    gpu_vram_total_mb: Option<u32>,
+    gpu_temp: Option<u32>,
+    disk_used_pct: u32,
+    disk_free_gb: u32,
+    vol: u32,
+    vol_muted: bool,
+    bat_capacity: u32,
+    bat_status: String,
+    net_quality: Option<u32>,
+    net_type: String,
+    net_ssid: Option<String>,
+    bluetooth_powered: bool,
+    bluetooth_device: Option<String>,
+    media_status: Option<String>,
+    media_title: Option<String>,
+    media_artist: Option<String>,
+    media_player: Option<String>,
 }
 
 #[derive(Debug)]
 enum AppMsg {
     Tick,
-    UpdateTelemetry {
-        cpu: f32,
-        mem: f32,
-        vol: u32,
-        vol_muted: bool,
-        bat_capacity: u32,
-        bat_status: String,
-        net_quality: Option<u32>,
-        net_type: String,
-        media_status: Option<String>,
-        media_title: Option<String>,
-    },
+    UpdateTelemetry(Box<TelemetryData>),
     UpdateHyprland {
         active_ws: u32,
         occupied_ws: Vec<u32>,
@@ -77,12 +149,53 @@ enum AppMsg {
         ws_base: u32,
     },
     SwitchWorkspaceSlot(u32),
+    SetDeckScreen(DeckScreen),
     ToggleMute,
+    AdjustVolume(i32),
+
+    // Embedded Bluetooth Deck
+    ToggleBluetooth,
+    ScanBluetooth,
+    ConnectBluetooth(String),
+    DisconnectBluetooth(String),
+    UpdateBtDevices(Vec<BtDeviceInfo>),
+
+    // Embedded Wi-Fi Deck
+    ToggleWifiRadio,
+    RescanWifi,
+    ConnectWifi(String),
+    SubmitWifiPassword(String),
+    DisconnectWifi,
+    SelectWifi(Option<String>),
+    UpdateWifiNetworks(Vec<WifiNetworkInfo>),
+    WifiActionStatus(Option<String>),
+
+    // Media & System
     ToggleMedia,
-    TriggerPower,
+    PrevMedia,
+    NextMedia,
+    ExecLock,
+    ExecSuspend,
+    ExecReboot,
+    ExecPoweroff,
+    ExecLogout,
+    TriggerLauncher,
 }
 
-fn meter_dots_4(pct: f32, active_color: &str, inactive_color: &str) -> String {
+fn get_asset_path(rel: &str) -> Option<String> {
+    let dev = std::path::Path::new("/home/s1re/dev/takt/assets").join(rel);
+    if dev.exists() {
+        return Some(dev.to_string_lossy().to_string());
+    }
+    let share = std::path::Path::new("/home/s1re/.local/share/takt/assets").join(rel);
+    if share.exists() {
+        return Some(share.to_string_lossy().to_string());
+    }
+    None
+}
+
+#[allow(dead_code)]
+fn meter_bars_4(pct: f32, active_color: &str, inactive_color: &str) -> String {
     let level = if pct <= 0.0 {
         0
     } else if pct < 25.0 {
@@ -97,15 +210,15 @@ fn meter_dots_4(pct: f32, active_color: &str, inactive_color: &str) -> String {
     let mut out = String::new();
     for i in 0..4 {
         if i < level {
-            out.push_str(&format!("<span foreground='{}'>▪</span>", active_color));
+            out.push_str(&format!("<span foreground='{}'>▮</span>", active_color));
         } else {
-            out.push_str(&format!("<span foreground='{}'>▫</span>", inactive_color));
+            out.push_str(&format!("<span foreground='{}'>▯</span>", inactive_color));
         }
     }
     out
 }
 
-fn cpu_markup(cpu: f32) -> String {
+fn cpu_perf_markup(cpu: f32, temp: Option<u32>) -> String {
     let color = if cpu >= 85.0 {
         "#BE5D3C"
     } else if cpu >= 50.0 {
@@ -113,14 +226,17 @@ fn cpu_markup(cpu: f32) -> String {
     } else {
         "#999208"
     };
-    let dots = meter_dots_4(cpu, color, "#353e26");
+    let bars = meter_bars_4(cpu, color, "#28341f");
+    let temp_str = temp
+        .map(|t| format!(" <span foreground='#FBFFE1'>{}°C</span>", t))
+        .unwrap_or_default();
     format!(
-        "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>CPU</span> <span font_family='Geist Mono' font_weight='bold' foreground='{}'>{:>2.0}%</span> <span font_family='Geist Mono' font_size='9.5pt'>{}</span>",
-        color, cpu, dots
+        "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#999208'>CPU //</span> <span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='{}'>{:>2.0}%</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span>{}",
+        color, cpu, bars, temp_str
     )
 }
 
-fn mem_markup(mem: f32) -> String {
+fn mem_perf_markup(mem: f32, used_gb: f32, total_gb: f32) -> String {
     let color = if mem >= 85.0 {
         "#BE5D3C"
     } else if mem >= 60.0 {
@@ -128,25 +244,121 @@ fn mem_markup(mem: f32) -> String {
     } else {
         "#D1CF8B"
     };
-    let dots = meter_dots_4(mem, color, "#353e26");
+    let bars = meter_bars_4(mem, color, "#28341f");
     format!(
-        "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>RAM</span> <span font_family='Geist Mono' font_weight='bold' foreground='{}'>{:>2.0}%</span> <span font_family='Geist Mono' font_size='9.5pt'>{}</span>",
-        color, mem, dots
+        "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#999208'>RAM //</span> <span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#FBFFE1'>{:.1}/{:.0}G</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span>",
+        used_gb, total_gb, bars
     )
 }
 
-fn vol_markup(vol: u32, muted: bool) -> String {
-    if muted {
-        "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>VOL</span> <span font_family='Geist Mono' font_weight='bold' foreground='#BE5D3C'>MUTE</span> <span font_family='Geist Mono' font_size='9.5pt' foreground='#353e26'>▫▫▫▫</span>".to_string()
-    } else {
-        let dots = meter_dots_4(vol as f32, "#D8A664", "#353e26");
+fn gpu_perf_markup(
+    usage: Option<u32>,
+    used_mb: Option<u32>,
+    total_mb: Option<u32>,
+    temp: Option<u32>,
+) -> String {
+    if let (Some(u), Some(used), Some(tot), Some(t)) = (usage, used_mb, total_mb, temp) {
+        let color = if u >= 85 {
+            "#BE5D3C"
+        } else if u >= 50 {
+            "#D8A664"
+        } else {
+            "#999208"
+        };
+        let bars = meter_bars_4(u as f32, color, "#28341f");
         format!(
-            "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>VOL</span> <span font_family='Geist Mono' font_weight='bold' foreground='#D8A664'>{:>2}%</span> <span font_family='Geist Mono' font_size='9.5pt'>{}</span>",
-            vol, dots
+            "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#D8A664'>GPU //</span> <span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='{}'>{:>2}%</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span> <span font_family='Geist Mono' font_size='8.5pt' foreground='#D1CF8B'>{:.1}/{:.0}G</span> <span font_family='Geist Mono' font_size='8.5pt' foreground='#FBFFE1'>{}°C</span>",
+            color,
+            u,
+            bars,
+            used as f32 / 1024.0,
+            tot as f32 / 1024.0,
+            t
         )
+    } else {
+        "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#5A6042'>GPU // OFF</span>".to_string()
     }
 }
 
+fn disk_perf_markup(used_pct: u32, free_gb: u32) -> String {
+    let color = if used_pct >= 90 {
+        "#BE5D3C"
+    } else if used_pct >= 75 {
+        "#D8A664"
+    } else {
+        "#D1CF8B"
+    };
+    format!(
+        "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#999208'>NVME //</span> <span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='{}'>{}%</span> <span font_family='Geist Mono' font_size='8.5pt' foreground='#5A6042'>({}G FREE)</span>",
+        color, used_pct, free_gb
+    )
+}
+
+fn media_studio_markup(
+    _status: Option<&str>,
+    artist: Option<&str>,
+    title: Option<&str>,
+    player: Option<&str>,
+) -> String {
+    let p_name = player.unwrap_or("MPRIS");
+    let track_info = match (artist, title) {
+        (Some(a), Some(t)) => format!("{} — {}", a, t),
+        (None, Some(t)) => t.to_string(),
+        _ => "No active playback".to_string(),
+    };
+    let escaped = gtk4::glib::markup_escape_text(&track_info);
+    format!(
+        "<span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='1000' foreground='#999208'>{} //</span> <span font_family='Geist Mono' font_weight='bold' font_size='9.5pt' foreground='#FBFFE1'>{}</span>",
+        p_name.to_uppercase(),
+        escaped
+    )
+}
+
+fn format_calendar() -> (String, String) {
+    use chrono::Datelike;
+    let now = chrono::Local::now();
+    let weekday = now.weekday().num_days_from_monday(); // 0..=6
+    let monday = now.date_naive() - chrono::Duration::days(weekday as i64);
+
+    let mut ribbon = String::new();
+    let day_names = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
+
+    for (i, name) in day_names.iter().enumerate() {
+        let d = monday + chrono::Duration::days(i as i64);
+        let day_num = d.day();
+        if i as u32 == weekday {
+            ribbon.push_str(&format!(
+                "<span background='#D8A664' foreground='#141C10' font_weight='bold'> {} {:02} </span>",
+                name, day_num
+            ));
+        } else if (i as u32) < weekday {
+            ribbon.push_str(&format!(
+                "<span foreground='#5A6042'> {} {:02} </span>",
+                name, day_num
+            ));
+        } else {
+            ribbon.push_str(&format!(
+                "<span foreground='#D1CF8B'> {} {:02} </span>",
+                name, day_num
+            ));
+        }
+        if i < 6 {
+            ribbon.push_str("<span foreground='#28351f'>│</span>");
+        }
+    }
+
+    let week_num = now.format("%V");
+    let day_of_year = now.format("%j");
+    let date_full = now.format("%d %b %Y").to_string().to_uppercase();
+    let stats = format!(
+        "<span font_family='Freigeist' font_weight='800' font_size='11pt' foreground='#FBFFE1'>{}</span> <span font_family='Geist Mono' font_size='8.5pt' foreground='#38462b'>│</span> <span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='1200' foreground='#999208'>WEEK {} · DAY {}</span>",
+        date_full, week_num, day_of_year
+    );
+
+    (ribbon, stats)
+}
+
+#[allow(dead_code)]
 fn bat_markup(cap: u32, status: &str) -> String {
     let is_charging = status == "Charging" || status == "Full";
     let color = if cap <= 20 && !is_charging {
@@ -156,91 +368,132 @@ fn bat_markup(cap: u32, status: &str) -> String {
     } else {
         "#FBFFE1"
     };
-    let dots = meter_dots_4(cap as f32, color, "#353e26");
+    let bars = meter_bars_4(cap as f32, color, "#28341f");
     let tag = if status == "Full" {
-        "FULL".to_string()
+        "100%".to_string()
     } else if status == "Charging" {
         format!("+{}%", cap)
     } else {
         format!("{}%", cap)
     };
     format!(
-        "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>BAT</span> <span font_family='Geist Mono' font_weight='bold' foreground='{}'>{}</span> <span font_family='Geist Mono' font_size='9.5pt'>{}</span>",
-        color, tag, dots
+        "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='{}'>{}</span> <span font_family='Geist Mono' font_size='6.5pt'>{}</span>",
+        color, tag, bars
     )
 }
 
-fn net_markup(quality: Option<u32>, net_type: &str) -> String {
-    match quality {
-        Some(q) => {
-            let dots = meter_dots_4(q as f32, "#999208", "#353e26");
-            format!(
-                "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>NET</span> <span font_family='Geist Mono' font_weight='bold' foreground='#999208'>{:>2}%</span> <span font_family='Geist Mono' font_size='9.5pt'>{}</span>",
-                q, dots
-            )
+fn network_markup(
+    quality: Option<u32>,
+    net_type: &str,
+    ssid: Option<&str>,
+    is_compact: bool,
+) -> String {
+    match net_type {
+        "WIFI" => {
+            if let Some(name) = ssid {
+                let max_len = if is_compact { 7 } else { 11 };
+                let display: String = name.chars().take(max_len).collect();
+                format!(
+                    "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#FBFFE1'>{}</span>",
+                    display
+                )
+            } else if let Some(q) = quality {
+                format!(
+                    "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#999208'>{:>2}%</span>",
+                    q
+                )
+            } else {
+                "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#999208'>WIFI</span>".to_string()
+            }
         }
-        None if net_type == "ETH" => {
-            "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>NET</span> <span font_family='Geist Mono' font_weight='bold' foreground='#999208'>ETH</span> <span font_family='Geist Mono' font_size='9.5pt' foreground='#999208'>▪▪▪▪</span>".to_string()
+        "ETH" => {
+            "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#999208'>ETH</span>".to_string()
         }
         _ => {
-            "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#5A6042'>NET</span> <span font_family='Geist Mono' font_weight='bold' foreground='#BE5D3C'>OFF</span> <span font_family='Geist Mono' font_size='9.5pt' foreground='#353e26'>▫▫▫▫</span>".to_string()
+            "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#BE5D3C'>OFF</span>".to_string()
         }
     }
 }
 
-fn clock_markup(time: &str, date: &str, sec: &str, tick: bool) -> String {
-    let delim = if tick {
-        "<span font_family='Geist Mono' font_weight='bold' font_size='11pt' foreground='#999208'>::</span>"
+fn bluetooth_markup(powered: bool, device: Option<&str>, is_compact: bool) -> String {
+    if !powered {
+        "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#3e4832'>BT OFF</span>".to_string()
+    } else if let Some(dev) = device {
+        let max_len = if is_compact { 7 } else { 11 };
+        let name: String = dev.chars().take(max_len).collect();
+        format!(
+            "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#FBFFE1'>{}</span>",
+            name
+        )
     } else {
-        "<span font_family='Geist Mono' font_weight='bold' font_size='11pt' foreground='#5A6042'>::</span>"
-    };
+        "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#999208'>BT ON</span>".to_string()
+    }
+}
+
+fn volume_markup(vol: u32, muted: bool) -> String {
+    if muted {
+        "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#BE5D3C'>MUTE</span>".to_string()
+    } else {
+        format!(
+            "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#D8A664'>{:>2}%</span>",
+            vol
+        )
+    }
+}
+
+fn power_markup() -> &'static str {
+    "<span font_family='Geist Mono' font_weight='bold' font_size='11pt' foreground='#BE5D3C'>⏻</span>"
+}
+
+fn clock_markup(time: &str, date: &str) -> String {
     format!(
-        "<span font_family='Freigeist' font_weight='800' font_size='12pt' foreground='#FBFFE1'>{}</span> {} <span font_family='Goga' font_weight='bold' font_size='10pt' foreground='#D1CF8B'>{}</span> <span font_family='Geist Mono' font_size='8.5pt' font_weight='bold' foreground='#5A6042'>:{}</span>",
-        time, delim, date, sec
+        "<span font_family='Freigeist' font_weight='800' font_size='11.5pt' foreground='#FBFFE1'>{}</span> <span font_family='Geist Mono' font_size='8.5pt' foreground='#38462b'>│</span> <span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='1500' foreground='#D1CF8B'>{}</span>",
+        time, date
     )
+}
+
+fn format_ws_label(ws_id: u32, active_ws: u32, occupied: &[u32]) -> String {
+    if active_ws == ws_id {
+        format!("{:02}", ws_id)
+    } else if occupied.contains(&ws_id) {
+        format!("{:02} •", ws_id)
+    } else {
+        format!("{:02}", ws_id)
+    }
 }
 
 fn window_title_markup(title: &str, is_compact: bool) -> String {
     let escaped = gtk4::glib::markup_escape_text(title);
-    let max_len = if is_compact { 18 } else { 34 };
+    let max_len = if is_compact { 32 } else { 55 };
     let char_count = escaped.chars().count();
-    let display = if char_count > max_len {
+    let display = if char_count == 0 {
+        "ready".to_string()
+    } else if char_count > max_len {
         let truncated: String = escaped.chars().take(max_len).collect();
         format!("{}…", truncated)
     } else {
         escaped.to_string()
     };
     format!(
-        "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='#999208'>◈ ACT //</span> <span font_family='Geist Mono' font_weight='bold' font_size='10pt' foreground='#FBFFE1'>{}</span>",
+        "<span font_family='Goga' font_size='8.5pt' font_weight='bold' letter_spacing='1000' foreground='#999208'>WIN //</span> <span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#FBFFE1'>{}</span> <span font_family='Geist Mono' font_size='9pt' foreground='#D8A664'>█</span>",
         display
     )
 }
 
-fn media_markup(status: Option<&str>, title: Option<&str>, is_compact: bool) -> String {
-    if let (Some(s), Some(t)) = (status, title) {
-        let (icon, col) = if s == "Playing" {
-            ("⏵ PLAY", "#D8A664")
-        } else {
-            ("⏸ PAUS", "#5A6042")
-        };
-        if is_compact {
-            return format!(
-                "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='{}'>{}</span>",
-                col, icon
-            );
-        }
-        let escaped = gtk4::glib::markup_escape_text(t);
-        let max_len = 24;
-        let char_count = escaped.chars().count();
+fn media_title_markup(title: Option<&str>, is_compact: bool) -> String {
+    if let Some(t) = title {
+        let max_len = if is_compact { 16 } else { 22 };
+        let char_count = t.chars().count();
         let display = if char_count > max_len {
-            let truncated: String = escaped.chars().take(max_len).collect();
+            let truncated: String = t.chars().take(max_len).collect();
             format!("{}…", truncated)
         } else {
-            escaped.to_string()
+            t.to_string()
         };
+        let escaped = gtk4::glib::markup_escape_text(&display);
         format!(
-            "<span font_family='Goga' font_size='9pt' font_weight='bold' foreground='{}'>{} //</span> <span font_family='Geist Mono' font_weight='bold' font_size='10pt' foreground='#FBFFE1'>{}</span>",
-            col, icon, display
+            "<span font_family='Geist Mono' font_weight='bold' font_size='8.5pt' foreground='#FBFFE1'>{}</span>",
+            escaped
         )
     } else {
         String::new()
@@ -255,6 +508,12 @@ fn get_ws_classes(active_ws: u32, ws_id: u32, occupied: &[u32]) -> &'static [&'s
     } else {
         &["ws-btn", "empty"]
     }
+}
+
+fn markup_label(markup: &str) -> gtk4::Label {
+    let lbl = gtk4::Label::new(None);
+    lbl.set_markup(markup);
+    lbl
 }
 
 #[relm4::component]
@@ -278,10 +537,32 @@ impl SimpleComponent for AppModel {
                 #[wrap(Some)]
                 set_start_widget = &gtk4::Box {
                     set_orientation: gtk4::Orientation::Horizontal,
-                    set_spacing: 8,
+                    set_spacing: 6,
                     set_valign: gtk4::Align::Center,
 
-                    // Workspaces Pod
+                    // Brand Anchor Pod ("Floaty blob thing")
+                    gtk4::Button {
+                        add_css_class: "tactile-pod",
+                        add_css_class: "pod-brand",
+                        connect_clicked => AppMsg::TriggerLauncher,
+
+                        gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 7,
+                            set_valign: gtk4::Align::Center,
+
+                            gtk4::Image {
+                                set_from_file: get_asset_path("s1re-mark-filled-gold.svg").as_deref(),
+                                set_pixel_size: 17,
+                            },
+                            gtk4::Label {
+                                add_css_class: "brand-text",
+                                set_markup: "<span font_family='Freigeist' font_weight='800' font_size='10pt' foreground='#FBFFE1'>s1re</span><span font_family='Geist Mono' font_weight='bold' font_size='8.5pt' foreground='#999208'> //</span>",
+                            }
+                        }
+                    },
+
+                    // Workspaces Pod (5 at a time, super easy to tell active vs occupied vs empty)
                     gtk4::Box {
                         set_orientation: gtk4::Orientation::Horizontal,
                         set_valign: gtk4::Align::Center,
@@ -289,54 +570,57 @@ impl SimpleComponent for AppModel {
                         add_css_class: "pod-workspaces",
 
                         gtk4::Button {
-                            set_label: &format!("{:02}", model.ws_base),
                             #[watch]
-                            set_label: &format!("{:02}", model.ws_base),
+                            set_label: &format_ws_label(model.ws_base, model.active_workspace, &model.occupied_workspaces),
                             #[watch]
                             set_css_classes: get_ws_classes(model.active_workspace, model.ws_base, &model.occupied_workspaces),
                             connect_clicked => AppMsg::SwitchWorkspaceSlot(0),
                         },
                         gtk4::Button {
-                            set_label: &format!("{:02}", model.ws_base + 1),
                             #[watch]
-                            set_label: &format!("{:02}", model.ws_base + 1),
+                            set_label: &format_ws_label(model.ws_base + 1, model.active_workspace, &model.occupied_workspaces),
                             #[watch]
                             set_css_classes: get_ws_classes(model.active_workspace, model.ws_base + 1, &model.occupied_workspaces),
                             connect_clicked => AppMsg::SwitchWorkspaceSlot(1),
                         },
                         gtk4::Button {
-                            set_label: &format!("{:02}", model.ws_base + 2),
                             #[watch]
-                            set_label: &format!("{:02}", model.ws_base + 2),
+                            set_label: &format_ws_label(model.ws_base + 2, model.active_workspace, &model.occupied_workspaces),
                             #[watch]
                             set_css_classes: get_ws_classes(model.active_workspace, model.ws_base + 2, &model.occupied_workspaces),
                             connect_clicked => AppMsg::SwitchWorkspaceSlot(2),
                         },
                         gtk4::Button {
-                            set_label: &format!("{:02}", model.ws_base + 3),
                             #[watch]
-                            set_label: &format!("{:02}", model.ws_base + 3),
+                            set_label: &format_ws_label(model.ws_base + 3, model.active_workspace, &model.occupied_workspaces),
                             #[watch]
                             set_css_classes: get_ws_classes(model.active_workspace, model.ws_base + 3, &model.occupied_workspaces),
                             connect_clicked => AppMsg::SwitchWorkspaceSlot(3),
                         },
                         gtk4::Button {
-                            set_label: &format!("{:02}", model.ws_base + 4),
                             #[watch]
-                            set_label: &format!("{:02}", model.ws_base + 4),
+                            set_label: &format_ws_label(model.ws_base + 4, model.active_workspace, &model.occupied_workspaces),
                             #[watch]
                             set_css_classes: get_ws_classes(model.active_workspace, model.ws_base + 4, &model.occupied_workspaces),
                             connect_clicked => AppMsg::SwitchWorkspaceSlot(4),
                         },
                     },
 
-                    // Active Window Pod
+                    // Active Window Pod ("win // thing")
                     gtk4::Box {
                         set_orientation: gtk4::Orientation::Horizontal,
+                        set_spacing: 6,
                         set_valign: gtk4::Align::Center,
                         add_css_class: "tactile-pod",
                         add_css_class: "pod-window",
+                        set_visible: model.current_screen == DeckScreen::Sys,
+                        #[watch]
+                        set_visible: model.current_screen == DeckScreen::Sys,
 
+                        gtk4::Image {
+                            set_from_file: get_asset_path("icons/window.svg").as_deref(),
+                            set_pixel_size: 13,
+                        },
                         gtk4::Label {
                             set_markup: &window_title_markup(&model.window_title, model.is_compact),
                             #[watch]
@@ -348,101 +632,997 @@ impl SimpleComponent for AppModel {
                 #[wrap(Some)]
                 set_center_widget = &gtk4::Box {
                     set_orientation: gtk4::Orientation::Horizontal,
+                    set_spacing: 6,
                     set_valign: gtk4::Align::Center,
-                    add_css_class: "tactile-pod",
-                    add_css_class: "pod-clock",
 
-                    gtk4::Label {
-                        set_markup: &clock_markup(&model.time_str, &model.date_str, &model.sec_str, model.sec_tick),
+                    // SCREEN 01: SYS (Master Chrono HUD)
+                    gtk4::Box {
+                        set_orientation: gtk4::Orientation::Horizontal,
+                        set_spacing: 8,
+                        set_valign: gtk4::Align::Center,
+                        add_css_class: "tactile-pod",
+                        add_css_class: "pod-clock",
+                        set_visible: model.current_screen == DeckScreen::Sys,
                         #[watch]
-                        set_markup: &clock_markup(&model.time_str, &model.date_str, &model.sec_str, model.sec_tick),
+                        set_visible: model.current_screen == DeckScreen::Sys,
+
+                        gtk4::Image {
+                            set_from_file: get_asset_path("icons/starburst.svg").as_deref(),
+                            set_pixel_size: 14,
+                        },
+                        gtk4::Label {
+                            #[watch]
+                            set_markup: &clock_markup(&model.time_str, &model.date_str),
+                        },
+                    },
+
+                    // SCREEN 02: PERF (Hardware Telemetry Cockpit)
+                    gtk4::Box {
+                        set_orientation: gtk4::Orientation::Horizontal,
+                        set_spacing: 6,
+                        set_valign: gtk4::Align::Center,
+                        set_visible: model.current_screen == DeckScreen::Perf,
+                        #[watch]
+                        set_visible: model.current_screen == DeckScreen::Perf,
+
+                        // CPU Pod
+                        gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 6,
+                            set_valign: gtk4::Align::Center,
+                            add_css_class: "tactile-pod",
+                            add_css_class: "pod-perf-cell",
+
+                            gtk4::Image {
+                                set_from_file: get_asset_path("icons/cpu.svg").as_deref(),
+                                set_pixel_size: 13,
+                            },
+                            gtk4::Label {
+                                #[watch]
+                                set_markup: &cpu_perf_markup(model.cpu_usage, model.cpu_temp),
+                            },
+                        },
+
+                        // Memory Pod
+                        gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 6,
+                            set_valign: gtk4::Align::Center,
+                            add_css_class: "tactile-pod",
+                            add_css_class: "pod-perf-cell",
+
+                            gtk4::Image {
+                                set_from_file: get_asset_path("icons/memory.svg").as_deref(),
+                                set_pixel_size: 13,
+                            },
+                            gtk4::Label {
+                                #[watch]
+                                set_markup: &mem_perf_markup(model.mem_usage, model.mem_used_gb, model.mem_total_gb),
+                            },
+                        },
+
+                        // NVIDIA GPU Pod
+                        gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 6,
+                            set_valign: gtk4::Align::Center,
+                            add_css_class: "tactile-pod",
+                            add_css_class: "pod-perf-cell",
+
+                            gtk4::Label {
+                                #[watch]
+                                set_markup: &gpu_perf_markup(model.gpu_usage, model.gpu_vram_used_mb, model.gpu_vram_total_mb, model.gpu_temp),
+                            },
+                        },
+
+                        // Storage NVMe Pod
+                        gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 6,
+                            set_valign: gtk4::Align::Center,
+                            add_css_class: "tactile-pod",
+                            add_css_class: "pod-perf-cell",
+
+                            gtk4::Label {
+                                #[watch]
+                                set_markup: &disk_perf_markup(model.disk_used_pct, model.disk_free_gb),
+                            },
+                        },
+
+                        // Battery Pod (when on laptop)
+                        gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 6,
+                            set_valign: gtk4::Align::Center,
+                            add_css_class: "tactile-pod",
+                            add_css_class: "pod-perf-cell",
+
+                            gtk4::Image {
+                                set_pixel_size: 13,
+                                #[watch]
+                                set_from_file: get_asset_path(if model.bat_status == "Charging" { "icons/battery-charging.svg" } else { "icons/battery.svg" }).as_deref(),
+                            },
+                            gtk4::Label {
+                                #[watch]
+                                set_markup: &bat_markup(model.bat_capacity, &model.bat_status),
+                            },
+                        },
+                    },
+
+                    // SCREEN 03: CAL (Chrono & Calendar Ribbon)
+                    gtk4::Box {
+                        set_orientation: gtk4::Orientation::Horizontal,
+                        set_spacing: 6,
+                        set_valign: gtk4::Align::Center,
+                        set_visible: model.current_screen == DeckScreen::Cal,
+                        #[watch]
+                        set_visible: model.current_screen == DeckScreen::Cal,
+
+                        // Date & Week Summary Pod
+                        gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 8,
+                            set_valign: gtk4::Align::Center,
+                            add_css_class: "tactile-pod",
+                            add_css_class: "pod-cal-summary",
+
+                            gtk4::Image {
+                                set_from_file: get_asset_path("icons/starburst.svg").as_deref(),
+                                set_pixel_size: 14,
+                            },
+                            gtk4::Label {
+                                #[watch]
+                                set_markup: &model.week_stats,
+                            },
+                        },
+
+                        // 7-Day Current Week Ribbon
+                        gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 2,
+                            set_valign: gtk4::Align::Center,
+                            add_css_class: "tactile-pod",
+                            add_css_class: "pod-week-ribbon",
+
+                            gtk4::Label {
+                                #[watch]
+                                set_markup: &model.week_ribbon,
+                            },
+                        },
+                    },
+
+                    // SCREEN 04: MEDIA (Expanded Studio Media Deck)
+                    gtk4::Box {
+                        set_orientation: gtk4::Orientation::Horizontal,
+                        set_spacing: 6,
+                        set_valign: gtk4::Align::Center,
+                        set_visible: model.current_screen == DeckScreen::Media,
+                        #[watch]
+                        set_visible: model.current_screen == DeckScreen::Media,
+
+                        // Expanded Studio Track Display
+                        gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 8,
+                            set_valign: gtk4::Align::Center,
+                            add_css_class: "tactile-pod",
+                            add_css_class: "pod-studio-track",
+
+                            gtk4::Image {
+                                set_from_file: get_asset_path("icons/mpris.svg").as_deref(),
+                                set_pixel_size: 14,
+                            },
+                            gtk4::Label {
+                                #[watch]
+                                set_markup: &media_studio_markup(
+                                    model.media_status.as_deref(),
+                                    model.media_artist.as_deref(),
+                                    model.media_title.as_deref(),
+                                    model.media_player.as_deref()
+                                ),
+                            },
+                        },
+
+                        // Full Studio Transport Controls
+                        gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 4,
+                            set_valign: gtk4::Align::Center,
+                            add_css_class: "tactile-pod",
+                            add_css_class: "pod-studio-transport",
+
+                            gtk4::Button {
+                                add_css_class: "media-ctrl-btn",
+                                connect_clicked => AppMsg::PrevMedia,
+                                gtk4::Label {
+                                    set_markup: "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#D1CF8B'>⏮ PREV</span>",
+                                },
+                            },
+                            gtk4::Button {
+                                add_css_class: "media-ctrl-btn",
+                                connect_clicked => AppMsg::ToggleMedia,
+                                gtk4::Label {
+                                    #[watch]
+                                    set_markup: if model.media_status.as_deref() == Some("Playing") {
+                                        "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#D8A664'>⏸ PAUSE</span>"
+                                    } else {
+                                        "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#999208'>▶ PLAY</span>"
+                                    },
+                                },
+                            },
+                            gtk4::Button {
+                                add_css_class: "media-ctrl-btn",
+                                connect_clicked => AppMsg::NextMedia,
+                                gtk4::Label {
+                                    set_markup: "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#D1CF8B'>NEXT ⏭</span>",
+                                },
+                            },
+                        },
                     },
                 },
 
                 #[wrap(Some)]
                 set_end_widget = &gtk4::Box {
                     set_orientation: gtk4::Orientation::Horizontal,
-                    set_spacing: 8,
+                    set_spacing: 6,
                     set_valign: gtk4::Align::Center,
 
-                    // Media Pod (visible when media exists)
+                    // Media Pod (visible when media is playing and NOT on Media screen)
                     gtk4::Box {
                         set_orientation: gtk4::Orientation::Horizontal,
+                        set_spacing: 4,
                         set_valign: gtk4::Align::Center,
                         add_css_class: "tactile-pod",
                         add_css_class: "pod-media",
-                        set_visible: model.media_status.is_some(),
+                        set_visible: model.media_status.is_some() && model.current_screen == DeckScreen::Sys,
                         #[watch]
-                        set_visible: model.media_status.is_some(),
+                        set_visible: model.media_status.is_some() && model.current_screen == DeckScreen::Sys,
 
+                        // Play/Pause toggle
                         gtk4::Button {
-                            add_css_class: "media-btn",
+                            add_css_class: "media-ctrl-btn",
                             connect_clicked => AppMsg::ToggleMedia,
                             gtk4::Label {
-                                set_markup: &media_markup(model.media_status.as_deref(), model.media_title.as_deref(), model.is_compact),
                                 #[watch]
-                                set_markup: &media_markup(model.media_status.as_deref(), model.media_title.as_deref(), model.is_compact),
+                                set_markup: if model.media_status.as_deref() == Some("Playing") {
+                                    "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#D8A664'>⏸</span>"
+                                } else {
+                                    "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#999208'>▶</span>"
+                                },
+                            }
+                        },
+                        // Track title
+                        gtk4::Label {
+                            add_css_class: "media-title-label",
+                            #[watch]
+                            set_markup: &media_title_markup(model.media_title.as_deref(), model.is_compact),
+                        },
+                        // Next track
+                        gtk4::Button {
+                            add_css_class: "media-ctrl-btn",
+                            connect_clicked => AppMsg::NextMedia,
+                            gtk4::Label {
+                                set_markup: "<span font_family='Geist Mono' font_weight='bold' font_size='9pt' foreground='#5A6042'>⏭</span>",
                             }
                         }
                     },
 
-                    // Unified Hardware Instrument Deck
+                    // 4 Screens Deck Selector Pod
                     gtk4::Box {
                         set_orientation: gtk4::Orientation::Horizontal,
                         set_valign: gtk4::Align::Center,
                         add_css_class: "tactile-pod",
-                        add_css_class: "pod-hardware",
+                        add_css_class: "pod-deck-selector",
 
-                        // CPU Cell
-                        gtk4::Label {
-                            add_css_class: "instrument-cell",
-                            set_markup: &cpu_markup(model.cpu_usage),
-                            #[watch]
-                            set_markup: &cpu_markup(model.cpu_usage),
-                        },
-                        // RAM Cell
-                        gtk4::Label {
-                            add_css_class: "instrument-cell",
-                            set_markup: &mem_markup(model.mem_usage),
-                            #[watch]
-                            set_markup: &mem_markup(model.mem_usage),
-                        },
-                        // Volume Cell
                         gtk4::Button {
-                            add_css_class: "instrument-btn",
-                            connect_clicked => AppMsg::ToggleMute,
+                            #[watch]
+                            set_css_classes: if model.current_screen == DeckScreen::Sys { &["deck-chip", "active"] } else { &["deck-chip", "idle"] },
+                            connect_clicked => AppMsg::SetDeckScreen(DeckScreen::Sys),
                             gtk4::Label {
-                                set_markup: &vol_markup(model.vol_level, model.vol_muted),
-                                #[watch]
-                                set_markup: &vol_markup(model.vol_level, model.vol_muted),
+                                set_markup: "<span font_family='Goga' font_weight='bold' font_size='8pt'>01 SYS</span>",
                             }
                         },
-                        // Battery Cell
-                        gtk4::Label {
-                            add_css_class: "instrument-cell",
-                            set_markup: &bat_markup(model.bat_capacity, &model.bat_status),
-                            #[watch]
-                            set_markup: &bat_markup(model.bat_capacity, &model.bat_status),
-                        },
-                        // Network Cell
-                        gtk4::Label {
-                            add_css_class: "instrument-cell",
-                            set_markup: &net_markup(model.net_quality, &model.net_type),
-                            #[watch]
-                            set_markup: &net_markup(model.net_quality, &model.net_type),
-                        },
-                        // Tactical Power Cell
                         gtk4::Button {
-                            add_css_class: "instrument-btn",
-                            add_css_class: "power-cell",
-                            connect_clicked => AppMsg::TriggerPower,
+                            #[watch]
+                            set_css_classes: if model.current_screen == DeckScreen::Perf { &["deck-chip", "active"] } else { &["deck-chip", "idle"] },
+                            connect_clicked => AppMsg::SetDeckScreen(DeckScreen::Perf),
                             gtk4::Label {
-                                set_markup: "<span font_family='Geist Mono' font_weight='bold' font_size='11pt' foreground='#BE5D3C'>⏻</span>",
+                                set_markup: "<span font_family='Goga' font_weight='bold' font_size='8pt'>02 PERF</span>",
+                            }
+                        },
+                        gtk4::Button {
+                            #[watch]
+                            set_css_classes: if model.current_screen == DeckScreen::Cal { &["deck-chip", "active"] } else { &["deck-chip", "idle"] },
+                            connect_clicked => AppMsg::SetDeckScreen(DeckScreen::Cal),
+                            gtk4::Label {
+                                set_markup: "<span font_family='Goga' font_weight='bold' font_size='8pt'>03 CAL</span>",
+                            }
+                        },
+                        gtk4::Button {
+                            #[watch]
+                            set_css_classes: if model.current_screen == DeckScreen::Media { &["deck-chip", "active"] } else { &["deck-chip", "idle"] },
+                            connect_clicked => AppMsg::SetDeckScreen(DeckScreen::Media),
+                            gtk4::Label {
+                                set_markup: "<span font_family='Goga' font_weight='bold' font_size='8pt'>04 MEDIA</span>",
                             }
                         },
                     },
+
+                    // Bluetooth Actionable Cell (MenuButton with native GTK4 Popover)
+                    gtk4::MenuButton {
+                        add_css_class: "tactile-pod",
+                        add_css_class: "pod-bt",
+                        set_direction: gtk4::ArrowType::Down,
+
+                        #[wrap(Some)]
+                        set_child = &gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 5,
+                            set_valign: gtk4::Align::Center,
+
+                            gtk4::Image {
+                                set_from_file: get_asset_path("icons/bluetooth.svg").as_deref(),
+                                set_pixel_size: 13,
+                            },
+                            gtk4::Label {
+                                #[watch]
+                                set_markup: &bluetooth_markup(model.bluetooth_powered, model.bluetooth_device.as_deref(), model.is_compact),
+                            }
+                        },
+
+                        #[wrap(Some)]
+                        set_popover = &gtk4::Popover {
+                            add_css_class: "tactile-popover",
+
+                            gtk4::Box {
+                                set_orientation: gtk4::Orientation::Vertical,
+                                set_spacing: 6,
+                                add_css_class: "popover-content",
+                                add_css_class: "deck-bt-popover",
+
+                                // Popover Header Bar
+                                gtk4::Box {
+                                    set_orientation: gtk4::Orientation::Horizontal,
+                                    set_spacing: 6,
+                                    set_valign: gtk4::Align::Center,
+
+                                    gtk4::Label {
+                                        set_hexpand: true,
+                                        set_halign: gtk4::Align::Start,
+                                        set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='1200' foreground='#999208'>BLUETOOTH // DECK</span>",
+                                    },
+
+                                    gtk4::Button {
+                                        add_css_class: "deck-ctrl-btn",
+                                        connect_clicked => AppMsg::ScanBluetooth,
+                                        gtk4::Label {
+                                            #[watch]
+                                            set_markup: if model.bt_scanning {
+                                                "<span font_family='Geist Mono' font_weight='bold' font_size='7.5pt' foreground='#D8A664'>SCANNING…</span>"
+                                            } else {
+                                                "<span font_family='Geist Mono' font_weight='bold' font_size='7.5pt' foreground='#D1CF8B'>SCAN</span>"
+                                            },
+                                        },
+                                    },
+
+                                    gtk4::Button {
+                                        add_css_class: "deck-ctrl-btn",
+                                        connect_clicked => AppMsg::ToggleBluetooth,
+                                        gtk4::Label {
+                                            #[watch]
+                                            set_markup: if model.bluetooth_powered {
+                                                "<span font_family='Geist Mono' font_weight='bold' font_size='7.5pt' foreground='#BE5D3C'>PWR OFF</span>"
+                                            } else {
+                                                "<span font_family='Geist Mono' font_weight='bold' font_size='7.5pt' foreground='#999208'>PWR ON</span>"
+                                            },
+                                        },
+                                    },
+                                },
+
+                                // Status Capsule
+                                gtk4::Box {
+                                    set_orientation: gtk4::Orientation::Horizontal,
+                                    set_spacing: 6,
+                                    add_css_class: "deck-status-capsule",
+
+                                    gtk4::Label {
+                                        #[watch]
+                                        set_markup: &format!(
+                                            "<span font_family='Geist Mono' font_size='8pt' foreground='{}'>STATUS: {}</span>",
+                                            if model.bluetooth_powered { "#FBFFE1" } else { "#BE5D3C" },
+                                            if !model.bluetooth_powered {
+                                                "POWERED OFF".to_string()
+                                            } else if let Some(ref dev) = model.bluetooth_device {
+                                                format!("CONNECTED // {}", dev)
+                                            } else {
+                                                "IDLE (NO ACTIVE CONNECTION)".to_string()
+                                            }
+                                        ),
+                                    },
+                                },
+
+                                // Scrolled Devices List
+                                gtk4::ScrolledWindow {
+                                    set_max_content_height: 200,
+                                    set_propagate_natural_height: true,
+                                    set_hscrollbar_policy: gtk4::PolicyType::Never,
+                                    set_vscrollbar_policy: gtk4::PolicyType::Automatic,
+                                    add_css_class: "deck-scrolled-list",
+
+                                    #[name = "bt_device_list_box"]
+                                    gtk4::Box {
+                                        set_orientation: gtk4::Orientation::Vertical,
+                                        set_spacing: 3,
+                                        add_css_class: "device-list-box",
+                                    }
+                                },
+                            }
+                        }
+                    },
+
+                    // Network Actionable Cell (MenuButton with native GTK4 Popover)
+                    gtk4::MenuButton {
+                        add_css_class: "tactile-pod",
+                        add_css_class: "instrument-btn",
+                        add_css_class: "pod-net",
+                        set_direction: gtk4::ArrowType::Down,
+
+                        #[wrap(Some)]
+                        set_child = &gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 5,
+                            set_valign: gtk4::Align::Center,
+
+                            gtk4::Image {
+                                set_from_file: get_asset_path("icons/network.svg").as_deref(),
+                                set_pixel_size: 13,
+                            },
+                            gtk4::Label {
+                                #[watch]
+                                set_markup: &network_markup(model.net_quality, &model.net_type, model.net_ssid.as_deref(), model.is_compact),
+                            }
+                        },
+
+                        #[wrap(Some)]
+                        set_popover = &gtk4::Popover {
+                            add_css_class: "tactile-popover",
+
+                            gtk4::Box {
+                                set_orientation: gtk4::Orientation::Vertical,
+                                set_spacing: 6,
+                                add_css_class: "popover-content",
+                                add_css_class: "deck-wifi-popover",
+
+                                // Popover Header Bar
+                                gtk4::Box {
+                                    set_orientation: gtk4::Orientation::Horizontal,
+                                    set_spacing: 6,
+                                    set_valign: gtk4::Align::Center,
+
+                                    gtk4::Label {
+                                        set_hexpand: true,
+                                        set_halign: gtk4::Align::Start,
+                                        set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='1200' foreground='#999208'>WI-FI // DECK</span>",
+                                    },
+
+                                    gtk4::Button {
+                                        add_css_class: "deck-ctrl-btn",
+                                        connect_clicked => AppMsg::RescanWifi,
+                                        gtk4::Label {
+                                            #[watch]
+                                            set_markup: if model.wifi_scanning {
+                                                "<span font_family='Geist Mono' font_weight='bold' font_size='7.5pt' foreground='#D8A664'>RESCANNING…</span>"
+                                            } else {
+                                                "<span font_family='Geist Mono' font_weight='bold' font_size='7.5pt' foreground='#D1CF8B'>RESCAN</span>"
+                                            },
+                                        },
+                                    },
+
+                                    gtk4::Button {
+                                        add_css_class: "deck-ctrl-btn",
+                                        connect_clicked => AppMsg::ToggleWifiRadio,
+                                        gtk4::Label {
+                                            #[watch]
+                                            set_markup: if model.wifi_radio_on {
+                                                "<span font_family='Geist Mono' font_weight='bold' font_size='7.5pt' foreground='#BE5D3C'>RADIO OFF</span>"
+                                            } else {
+                                                "<span font_family='Geist Mono' font_weight='bold' font_size='7.5pt' foreground='#999208'>RADIO ON</span>"
+                                            },
+                                        },
+                                    },
+                                },
+
+                                // Optional Status Message Banner
+                                gtk4::Box {
+                                    set_orientation: gtk4::Orientation::Horizontal,
+                                    add_css_class: "deck-status-capsule",
+                                    #[watch]
+                                    set_visible: model.wifi_status_msg.is_some(),
+
+                                    gtk4::Label {
+                                        #[watch]
+                                        set_markup: &format!(
+                                            "<span font_family='Geist Mono' font_weight='bold' font_size='8pt' foreground='#D8A664'>{}</span>",
+                                            model.wifi_status_msg.as_deref().unwrap_or("")
+                                        ),
+                                    },
+                                },
+
+                                // Active Connection Pill (when connected to Wi-Fi)
+                                gtk4::Box {
+                                    set_orientation: gtk4::Orientation::Horizontal,
+                                    set_spacing: 6,
+                                    set_valign: gtk4::Align::Center,
+                                    add_css_class: "deck-active-capsule",
+                                    #[watch]
+                                    set_visible: model.net_ssid.is_some() && model.net_type == "WIFI",
+
+                                    gtk4::Label {
+                                        set_hexpand: true,
+                                        set_halign: gtk4::Align::Start,
+                                        #[watch]
+                                        set_markup: &format!(
+                                            "<span font_family='Geist Mono' font_weight='bold' font_size='8.5pt' foreground='#FBFFE1'>ACTIVE: {}</span> <span font_family='Geist Mono' font_size='7.5pt' foreground='#999208'>({}%)</span>",
+                                            model.net_ssid.as_deref().unwrap_or(""),
+                                            model.net_quality.unwrap_or(0)
+                                        ),
+                                    },
+
+                                    gtk4::Button {
+                                        add_css_class: "btn-action-disconnect",
+                                        connect_clicked => AppMsg::DisconnectWifi,
+                                        gtk4::Label {
+                                            set_markup: "<span font_family='Geist Mono' font_weight='bold' font_size='7.5pt' foreground='#BE5D3C'>DISCONNECT</span>",
+                                        }
+                                    }
+                                },
+
+                                // Scrolled Networks List
+                                gtk4::ScrolledWindow {
+                                    set_max_content_height: 200,
+                                    set_propagate_natural_height: true,
+                                    set_hscrollbar_policy: gtk4::PolicyType::Never,
+                                    set_vscrollbar_policy: gtk4::PolicyType::Automatic,
+                                    add_css_class: "deck-scrolled-list",
+
+                                    #[name = "wifi_network_list_box"]
+                                    gtk4::Box {
+                                        set_orientation: gtk4::Orientation::Vertical,
+                                        set_spacing: 3,
+                                        add_css_class: "network-list-box",
+                                    }
+                                },
+
+                                // Inline Password Entry Form
+                                #[name = "wifi_pw_box"]
+                                gtk4::Box {
+                                    set_orientation: gtk4::Orientation::Vertical,
+                                    set_spacing: 5,
+                                    add_css_class: "wifi-pw-box",
+                                    #[watch]
+                                    set_visible: model.wifi_selected_ssid.is_some(),
+
+                                    gtk4::Label {
+                                        set_halign: gtk4::Align::Start,
+                                        #[watch]
+                                        set_markup: &format!(
+                                            "<span font_family='Goga' font_weight='bold' font_size='8pt' letter_spacing='1000' foreground='#D8A664'>JOIN // {}</span>",
+                                            gtk4::glib::markup_escape_text(model.wifi_selected_ssid.as_deref().unwrap_or(""))
+                                        ),
+                                    },
+
+                                    #[name = "wifi_password_entry"]
+                                    gtk4::PasswordEntry {
+                                        set_show_peek_icon: true,
+                                        set_placeholder_text: Some("Enter WPA Key..."),
+                                        add_css_class: "wifi-pw-input",
+                                        connect_activate[sender] => move |entry| {
+                                            let pw = entry.text().to_string();
+                                            sender.input(AppMsg::SubmitWifiPassword(pw));
+                                        },
+                                    },
+
+                                    gtk4::Box {
+                                        set_orientation: gtk4::Orientation::Horizontal,
+                                        set_spacing: 6,
+                                        set_halign: gtk4::Align::End,
+
+                                        gtk4::Button {
+                                            add_css_class: "pw-btn-cancel",
+                                            connect_clicked => AppMsg::SelectWifi(None),
+                                            gtk4::Label {
+                                                set_markup: "<span font_family='Geist Mono' font_weight='bold' font_size='7.5pt' foreground='#5A6042'>CANCEL</span>",
+                                            },
+                                        },
+
+                                        gtk4::Button {
+                                            add_css_class: "pw-btn-join",
+                                            connect_clicked[sender, wifi_password_entry] => move |_| {
+                                                let pw = wifi_password_entry.text().to_string();
+                                                sender.input(AppMsg::SubmitWifiPassword(pw));
+                                            },
+                                            gtk4::Label {
+                                                set_markup: "<span font_family='Geist Mono' font_weight='bold' font_size='7.5pt' foreground='#141C10'>JOIN NETWORK</span>",
+                                            },
+                                        },
+                                    },
+                                },
+                            }
+                        }
+                    },
+
+                    // Volume Actionable Cell (MenuButton with native GTK4 Popover)
+                    gtk4::MenuButton {
+                        add_css_class: "tactile-pod",
+                        add_css_class: "instrument-btn",
+                        add_css_class: "pod-vol",
+                        set_direction: gtk4::ArrowType::Down,
+
+                        #[wrap(Some)]
+                        set_child = &gtk4::Box {
+                            set_orientation: gtk4::Orientation::Horizontal,
+                            set_spacing: 5,
+                            set_valign: gtk4::Align::Center,
+
+                            gtk4::Image {
+                                set_pixel_size: 13,
+                                #[watch]
+                                set_from_file: get_asset_path(if model.vol_muted { "icons/volume-muted.svg" } else { "icons/volume.svg" }).as_deref(),
+                            },
+                            gtk4::Label {
+                                #[watch]
+                                set_markup: &volume_markup(model.vol_level, model.vol_muted),
+                            }
+                        },
+
+                        #[wrap(Some)]
+                        set_popover = &gtk4::Popover {
+                            add_css_class: "tactile-popover",
+
+                            gtk4::Box {
+                                set_orientation: gtk4::Orientation::Vertical,
+                                set_spacing: 6,
+                                add_css_class: "popover-content",
+
+                                gtk4::Label {
+                                    set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='1200' foreground='#999208'>AUDIO // OUTPUT SINK</span>",
+                                },
+
+                                gtk4::Label {
+                                    #[watch]
+                                    set_markup: &format!("<span font_family='Geist Mono' font_weight='bold' font_size='13pt' foreground='#FBFFE1'>{}%</span>", model.vol_level),
+                                },
+
+                                gtk4::Box {
+                                    set_orientation: gtk4::Orientation::Horizontal,
+                                    set_spacing: 4,
+                                    set_halign: gtk4::Align::Center,
+
+                                    gtk4::Button {
+                                        add_css_class: "quick-vol-btn",
+                                        connect_clicked => AppMsg::AdjustVolume(-10),
+                                        gtk4::Label { set_markup: "<span font_family='Geist Mono' font_size='8pt'>-10%</span>" },
+                                    },
+                                    gtk4::Button {
+                                        add_css_class: "quick-vol-btn",
+                                        connect_clicked => AppMsg::AdjustVolume(-5),
+                                        gtk4::Label { set_markup: "<span font_family='Geist Mono' font_size='8pt'>-5%</span>" },
+                                    },
+                                    gtk4::Button {
+                                        add_css_class: "quick-vol-btn",
+                                        connect_clicked => AppMsg::AdjustVolume(5),
+                                        gtk4::Label { set_markup: "<span font_family='Geist Mono' font_size='8pt'>+5%</span>" },
+                                    },
+                                    gtk4::Button {
+                                        add_css_class: "quick-vol-btn",
+                                        connect_clicked => AppMsg::AdjustVolume(10),
+                                        gtk4::Label { set_markup: "<span font_family='Geist Mono' font_size='8pt'>+10%</span>" },
+                                    },
+                                },
+
+                                gtk4::Button {
+                                    add_css_class: "menu-action-btn",
+                                    connect_clicked => AppMsg::ToggleMute,
+                                    gtk4::Label {
+                                        #[watch]
+                                        set_markup: if model.vol_muted {
+                                            "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#999208'>󰕾  UNMUTE AUDIO</span>"
+                                        } else {
+                                            "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#BE5D3C'>󰝟  MUTE AUDIO</span>"
+                                        },
+                                    }
+                                },
+                            }
+                        }
+                    },
+
+                    // Dedicated Power Mode Latch (MenuButton with native GTK4 Popover)
+                    gtk4::MenuButton {
+                        add_css_class: "tactile-pod",
+                        add_css_class: "pod-power",
+                        set_direction: gtk4::ArrowType::Down,
+
+                        #[wrap(Some)]
+                        set_child = &gtk4::Label {
+                            set_markup: power_markup(),
+                        },
+
+                        #[wrap(Some)]
+                        set_popover = &gtk4::Popover {
+                            add_css_class: "tactile-popover",
+
+                            gtk4::Box {
+                                set_orientation: gtk4::Orientation::Vertical,
+                                set_spacing: 4,
+                                add_css_class: "popover-content",
+
+                                gtk4::Label {
+                                    set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='1200' foreground='#999208'>SYSTEM // POWER</span>",
+                                },
+
+                                gtk4::Button {
+                                    add_css_class: "menu-action-btn",
+                                    connect_clicked => AppMsg::ExecLock,
+                                    gtk4::Label {
+                                        set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#FBFFE1'>  LOCK SCREEN</span>",
+                                    }
+                                },
+                                gtk4::Button {
+                                    add_css_class: "menu-action-btn",
+                                    connect_clicked => AppMsg::ExecSuspend,
+                                    gtk4::Label {
+                                        set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#D1CF8B'>󰒲  SUSPEND / SLEEP</span>",
+                                    }
+                                },
+                                gtk4::Button {
+                                    add_css_class: "menu-action-btn",
+                                    connect_clicked => AppMsg::ExecReboot,
+                                    gtk4::Label {
+                                        set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#D8A664'>󰑓  REBOOT SYSTEM</span>",
+                                    }
+                                },
+                                gtk4::Button {
+                                    add_css_class: "menu-action-btn",
+                                    add_css_class: "btn-danger",
+                                    connect_clicked => AppMsg::ExecPoweroff,
+                                    gtk4::Label {
+                                        set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#BE5D3C'>  POWER OFF</span>",
+                                    }
+                                },
+                                gtk4::Button {
+                                    add_css_class: "menu-action-btn",
+                                    connect_clicked => AppMsg::ExecLogout,
+                                    gtk4::Label {
+                                        set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#5A6042'>󰗼  LOGOUT HYPRLAND</span>",
+                                    }
+                                },
+                            }
+                        }
+                    },
                 },
             },
+        }
+    }
+
+    fn post_view() {
+        if model.wifi_selected_ssid.is_none() {
+            wifi_password_entry.set_text("");
+        }
+
+        if model.bt_dirty.swap(false, Ordering::Relaxed) {
+            while let Some(child) = bt_device_list_box.first_child() {
+                bt_device_list_box.remove(&child);
+            }
+
+            if !model.bluetooth_powered {
+                let empty_lbl = markup_label("<span font_family='Geist Mono' font_size='8pt' foreground='#5A6042'>BLUETOOTH IS OFF</span>");
+                empty_lbl.set_margin_top(8);
+                empty_lbl.set_margin_bottom(8);
+                bt_device_list_box.append(&empty_lbl);
+            } else if model.bt_devices.is_empty() {
+                let empty_lbl = markup_label("<span font_family='Geist Mono' font_size='8pt' foreground='#5A6042'>NO PAIRED DEVICES FOUND</span>");
+                empty_lbl.set_margin_top(8);
+                empty_lbl.set_margin_bottom(8);
+                bt_device_list_box.append(&empty_lbl);
+            } else {
+                for dev in &model.bt_devices {
+                    let row = gtk4::Box::builder()
+                        .orientation(gtk4::Orientation::Horizontal)
+                        .spacing(8)
+                        .css_classes(["bt-device-row"])
+                        .build();
+
+                    let icon_glyph = if dev.name.to_lowercase().contains("bud")
+                        || dev.name.to_lowercase().contains("headphone")
+                        || dev.name.to_lowercase().contains("audio")
+                    {
+                        "󰋋"
+                    } else if dev.name.to_lowercase().contains("mouse") {
+                        "󰍽"
+                    } else if dev.name.to_lowercase().contains("key") {
+                        "󰌌"
+                    } else {
+                        "󰂯"
+                    };
+
+                    let icon_color = if dev.connected { "#999208" } else { "#5A6042" };
+                    let icon_lbl = markup_label(&format!(
+                        "<span font_family='Geist Mono' font_size='10pt' foreground='{}'>{}</span>",
+                        icon_color, icon_glyph
+                    ));
+                    row.append(&icon_lbl);
+
+                    let info_box = gtk4::Box::builder()
+                        .orientation(gtk4::Orientation::Vertical)
+                        .spacing(1)
+                        .hexpand(true)
+                        .build();
+
+                    let name_escaped = gtk4::glib::markup_escape_text(&dev.name);
+                    let name_lbl = markup_label(&format!(
+                        "<span font_family='Geist Mono' font_weight='bold' font_size='8pt' foreground='{}'>{}</span>",
+                        if dev.connected { "#FBFFE1" } else { "#D1CF8B" },
+                        name_escaped
+                    ));
+                    name_lbl.set_halign(gtk4::Align::Start);
+                    name_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+
+                    let mac_lbl = markup_label(&format!(
+                        "<span font_family='Geist Mono' font_size='6.5pt' foreground='#5A6042'>{}</span>",
+                        dev.mac
+                    ));
+                    mac_lbl.set_halign(gtk4::Align::Start);
+
+                    info_box.append(&name_lbl);
+                    info_box.append(&mac_lbl);
+                    row.append(&info_box);
+
+                    let btn = gtk4::Button::builder().build();
+                    let sender_c = sender.clone();
+                    let mac_c = dev.mac.clone();
+
+                    if dev.connected {
+                        btn.add_css_class("btn-action-disconnect");
+                        let btn_lbl = markup_label("<span font_family='Geist Mono' font_weight='bold' font_size='7pt' foreground='#BE5D3C'>DISCONNECT</span>");
+                        btn.set_child(Some(&btn_lbl));
+                        btn.connect_clicked(move |_| {
+                            sender_c.input(AppMsg::DisconnectBluetooth(mac_c.clone()));
+                        });
+                    } else {
+                        btn.add_css_class("btn-action-connect");
+                        let btn_lbl = markup_label("<span font_family='Geist Mono' font_weight='bold' font_size='7pt' foreground='#141C10'>CONNECT</span>");
+                        btn.set_child(Some(&btn_lbl));
+                        btn.connect_clicked(move |_| {
+                            sender_c.input(AppMsg::ConnectBluetooth(mac_c.clone()));
+                        });
+                    }
+                    row.append(&btn);
+                    bt_device_list_box.append(&row);
+                }
+            }
+        }
+
+        if model.wifi_dirty.swap(false, Ordering::Relaxed) {
+            while let Some(child) = wifi_network_list_box.first_child() {
+                wifi_network_list_box.remove(&child);
+            }
+
+            if !model.wifi_radio_on {
+                let empty_lbl = markup_label("<span font_family='Geist Mono' font_size='8pt' foreground='#5A6042'>WI-FI RADIO IS DISABLED</span>");
+                empty_lbl.set_margin_top(8);
+                empty_lbl.set_margin_bottom(8);
+                wifi_network_list_box.append(&empty_lbl);
+            } else if model.wifi_networks.is_empty() {
+                let empty_lbl = markup_label("<span font_family='Geist Mono' font_size='8pt' foreground='#5A6042'>SCANNING FOR NETWORKS...</span>");
+                empty_lbl.set_margin_top(8);
+                empty_lbl.set_margin_bottom(8);
+                wifi_network_list_box.append(&empty_lbl);
+            } else {
+                for net in &model.wifi_networks {
+                    let row = gtk4::Box::builder()
+                        .orientation(gtk4::Orientation::Horizontal)
+                        .spacing(8)
+                        .css_classes(["wifi-network-row"])
+                        .build();
+
+                    let signal_glyph = if net.signal >= 75 {
+                        "▂▄▆█"
+                    } else if net.signal >= 50 {
+                        "▂▄▆_"
+                    } else if net.signal >= 25 {
+                        "▂▄__"
+                    } else {
+                        "▂___"
+                    };
+                    let sig_color = if net.signal >= 60 {
+                        "#999208"
+                    } else if net.signal >= 35 {
+                        "#D8A664"
+                    } else {
+                        "#5A6042"
+                    };
+                    let sig_lbl = markup_label(&format!(
+                        "<span font_family='Geist Mono' font_size='7pt' foreground='{}'>{}</span>",
+                        sig_color, signal_glyph
+                    ));
+                    row.append(&sig_lbl);
+
+                    let info_box = gtk4::Box::builder()
+                        .orientation(gtk4::Orientation::Vertical)
+                        .spacing(1)
+                        .hexpand(true)
+                        .build();
+
+                    let ssid_escaped = gtk4::glib::markup_escape_text(&net.ssid);
+                    let ssid_lbl = markup_label(&format!(
+                        "<span font_family='Geist Mono' font_weight='bold' font_size='8pt' foreground='{}'>{}</span>",
+                        if net.in_use { "#FBFFE1" } else { "#D1CF8B" },
+                        ssid_escaped
+                    ));
+                    ssid_lbl.set_halign(gtk4::Align::Start);
+                    ssid_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+
+                    let sec_str = if net.security.is_empty() || net.security == "--" {
+                        "OPEN"
+                    } else {
+                        &net.security
+                    };
+                    let tag_str = if net.in_use {
+                        format!(
+                            "<span foreground='#999208'>CONNECTED</span> · <span foreground='#5A6042'>{} · {}%</span>",
+                            sec_str, net.signal
+                        )
+                    } else if net.is_known {
+                        format!(
+                            "<span foreground='#D8A664'>SAVED</span> · <span foreground='#5A6042'>{} · {}%</span>",
+                            sec_str, net.signal
+                        )
+                    } else {
+                        format!(
+                            "<span foreground='#5A6042'>{} · {}%</span>",
+                            sec_str, net.signal
+                        )
+                    };
+                    let tag_lbl = markup_label(&format!(
+                        "<span font_family='Geist Mono' font_size='6.5pt'>{}</span>",
+                        tag_str
+                    ));
+                    tag_lbl.set_halign(gtk4::Align::Start);
+
+                    info_box.append(&ssid_lbl);
+                    info_box.append(&tag_lbl);
+                    row.append(&info_box);
+
+                    let btn = gtk4::Button::builder().build();
+                    let sender_c = sender.clone();
+                    let ssid_c = net.ssid.clone();
+
+                    if net.in_use {
+                        btn.add_css_class("btn-action-disconnect");
+                        let btn_lbl = markup_label("<span font_family='Geist Mono' font_weight='bold' font_size='7pt' foreground='#BE5D3C'>DISCONNECT</span>");
+                        btn.set_child(Some(&btn_lbl));
+                        btn.connect_clicked(move |_| {
+                            sender_c.input(AppMsg::DisconnectWifi);
+                        });
+                    } else if net.is_known || net.security.is_empty() || net.security == "--" {
+                        btn.add_css_class("btn-action-connect");
+                        let btn_lbl = markup_label("<span font_family='Geist Mono' font_weight='bold' font_size='7pt' foreground='#141C10'>CONNECT</span>");
+                        btn.set_child(Some(&btn_lbl));
+                        btn.connect_clicked(move |_| {
+                            sender_c.input(AppMsg::ConnectWifi(ssid_c.clone()));
+                        });
+                    } else {
+                        btn.add_css_class("btn-action-join");
+                        let btn_lbl = markup_label("<span font_family='Geist Mono' font_weight='bold' font_size='7pt' foreground='#D8A664'>JOIN</span>");
+                        btn.set_child(Some(&btn_lbl));
+                        btn.connect_clicked(move |_| {
+                            sender_c.input(AppMsg::SelectWifi(Some(ssid_c.clone())));
+                        });
+                    }
+                    row.append(&btn);
+                    wifi_network_list_box.append(&row);
+                }
+            }
         }
     }
 
@@ -462,6 +1642,7 @@ impl SimpleComponent for AppModel {
         root.set_anchor(Edge::Top, true);
         root.set_anchor(Edge::Left, true);
         root.set_anchor(Edge::Right, true);
+        root.set_keyboard_mode(KeyboardMode::OnDemand);
         root.auto_exclusive_zone_enable();
 
         // Bind explicitly to the target monitor
@@ -484,42 +1665,87 @@ impl SimpleComponent for AppModel {
         sys.refresh_memory();
         sys.refresh_cpu_all();
         let mem = (sys.used_memory() as f32 / sys.total_memory() as f32) * 100.0;
+        let mem_used_gb = sys.used_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
+        let mem_total_gb = sys.total_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
+        let cpu_temp = read_cpu_temp();
+        let (gpu_usage, gpu_vram_used_mb, gpu_vram_total_mb, gpu_temp) = read_gpu();
+        let (disk_used_pct, disk_free_gb) = read_disk();
+        let (week_ribbon, week_stats) = format_calendar();
 
         let (vol_level, vol_muted) = read_volume();
         let (bat_capacity, bat_status) = read_battery();
-        let (net_quality, net_type) = read_network();
-        let (media_status, media_title) = read_media()
-            .map(|(s, t)| (Some(s), Some(t)))
-            .unwrap_or((None, None));
+        let (net_quality, net_type, net_ssid) = read_network();
+        let (bluetooth_powered, bluetooth_device) = read_bluetooth();
+        let bt_devices = read_bluetooth_devices();
+        let wifi_radio_on = read_wifi_radio();
+        let wifi_networks = read_wifi_networks();
+        let (media_status, media_title, media_artist, media_player) = read_media()
+            .map(|(s, t, a, p)| (Some(s), Some(t), a, p))
+            .unwrap_or((None, None, None, None));
         let (active_ws, occupied_ws, window_title, ws_base) =
             read_hyprland_state_fast(&target_monitor);
 
         let now = chrono::Local::now();
+        let initial_screen = match std::env::var("TAKT_SCREEN").as_deref() {
+            Ok("2") | Ok("perf") => DeckScreen::Perf,
+            Ok("3") | Ok("cal") => DeckScreen::Cal,
+            Ok("4") | Ok("media") => DeckScreen::Media,
+            _ => DeckScreen::Sys,
+        };
         let model = AppModel {
             _target_monitor: target_monitor.clone(),
             ws_base,
             is_compact,
+            current_screen: initial_screen,
 
             time_str: now.format("%H:%M").to_string(),
-            date_str: now.format("%a %d %b").to_string().to_uppercase(),
-            sec_str: now.format("%S").to_string(),
-            sec_tick: true,
+            date_str: now.format("%a · %d %b").to_string().to_uppercase(),
+            week_ribbon,
+            week_stats,
 
             active_workspace: active_ws,
             occupied_workspaces: occupied_ws,
             window_title,
 
             cpu_usage: sys.global_cpu_usage(),
+            cpu_temp,
             mem_usage: mem,
+            mem_used_gb,
+            mem_total_gb,
+
+            gpu_usage,
+            gpu_vram_used_mb,
+            gpu_vram_total_mb,
+            gpu_temp,
+
+            disk_used_pct,
+            disk_free_gb,
+
             vol_level,
             vol_muted,
             bat_capacity,
             bat_status,
             net_quality,
             net_type,
+            net_ssid,
+
+            bluetooth_powered,
+            bluetooth_device,
+            bt_devices,
+            bt_scanning: false,
+            bt_dirty: AtomicBool::new(true),
+
+            wifi_radio_on,
+            wifi_networks,
+            wifi_scanning: false,
+            wifi_selected_ssid: None,
+            wifi_status_msg: None,
+            wifi_dirty: AtomicBool::new(true),
 
             media_status,
             media_title,
+            media_artist,
+            media_player,
         };
 
         let widgets = view_output!();
@@ -528,33 +1754,66 @@ impl SimpleComponent for AppModel {
         let sender_telemetry = sender.clone();
         std::thread::spawn(move || {
             let mut sys = sysinfo::System::new_all();
+            let mut tick_count: u32 = 0;
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(1000));
+                tick_count = tick_count.wrapping_add(1);
                 sys.refresh_cpu_all();
                 sys.refresh_memory();
 
                 let cpu = sys.global_cpu_usage();
+                let cpu_temp = read_cpu_temp();
                 let mem = (sys.used_memory() as f32 / sys.total_memory() as f32) * 100.0;
+                let mem_used_gb = sys.used_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
+                let mem_total_gb = sys.total_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
+                let (gpu_usage, gpu_vram_used_mb, gpu_vram_total_mb, gpu_temp) = read_gpu();
+                let (disk_used_pct, disk_free_gb) = read_disk();
                 let (vol, vol_muted) = read_volume();
                 let (bat_capacity, bat_status) = read_battery();
-                let (net_quality, net_type) = read_network();
-                let (media_status, media_title) = read_media()
-                    .map(|(s, t)| (Some(s), Some(t)))
-                    .unwrap_or((None, None));
+                let (net_quality, net_type, net_ssid) = read_network();
+                let (bluetooth_powered, bluetooth_device) = read_bluetooth();
+                let (media_status, media_title, media_artist, media_player) = read_media()
+                    .map(|(s, t, a, p)| (Some(s), Some(t), a, p))
+                    .unwrap_or((None, None, None, None));
 
-                sender_telemetry.input(AppMsg::UpdateTelemetry {
+                sender_telemetry.input(AppMsg::UpdateTelemetry(Box::new(TelemetryData {
                     cpu,
+                    cpu_temp,
                     mem,
+                    mem_used_gb,
+                    mem_total_gb,
+                    gpu_usage,
+                    gpu_vram_used_mb,
+                    gpu_vram_total_mb,
+                    gpu_temp,
+                    disk_used_pct,
+                    disk_free_gb,
                     vol,
                     vol_muted,
                     bat_capacity,
                     bat_status,
                     net_quality,
                     net_type,
+                    net_ssid,
+                    bluetooth_powered,
+                    bluetooth_device,
                     media_status,
                     media_title,
-                });
+                    media_artist,
+                    media_player,
+                })));
                 sender_telemetry.input(AppMsg::Tick);
+
+                // Periodic device sync every 8 seconds
+                if tick_count.is_multiple_of(8) {
+                    let s_sync = sender_telemetry.clone();
+                    std::thread::spawn(move || {
+                        let devs = read_bluetooth_devices();
+                        let nets = read_wifi_networks();
+                        s_sync.input(AppMsg::UpdateBtDevices(devs));
+                        s_sync.input(AppMsg::UpdateWifiNetworks(nets));
+                    });
+                }
             }
         });
 
@@ -640,32 +1899,36 @@ impl SimpleComponent for AppModel {
             AppMsg::Tick => {
                 let now = chrono::Local::now();
                 self.time_str = now.format("%H:%M").to_string();
-                self.date_str = now.format("%a %d %b").to_string().to_uppercase();
-                self.sec_str = now.format("%S").to_string();
-                self.sec_tick = !self.sec_tick;
+                self.date_str = now.format("%a · %d %b").to_string().to_uppercase();
+                let (ribbon, stats) = format_calendar();
+                self.week_ribbon = ribbon;
+                self.week_stats = stats;
             }
-            AppMsg::UpdateTelemetry {
-                cpu,
-                mem,
-                vol,
-                vol_muted,
-                bat_capacity,
-                bat_status,
-                net_quality,
-                net_type,
-                media_status,
-                media_title,
-            } => {
-                self.cpu_usage = cpu;
-                self.mem_usage = mem;
-                self.vol_level = vol;
-                self.vol_muted = vol_muted;
-                self.bat_capacity = bat_capacity;
-                self.bat_status = bat_status;
-                self.net_quality = net_quality;
-                self.net_type = net_type;
-                self.media_status = media_status;
-                self.media_title = media_title;
+            AppMsg::UpdateTelemetry(data) => {
+                self.cpu_usage = data.cpu;
+                self.cpu_temp = data.cpu_temp;
+                self.mem_usage = data.mem;
+                self.mem_used_gb = data.mem_used_gb;
+                self.mem_total_gb = data.mem_total_gb;
+                self.gpu_usage = data.gpu_usage;
+                self.gpu_vram_used_mb = data.gpu_vram_used_mb;
+                self.gpu_vram_total_mb = data.gpu_vram_total_mb;
+                self.gpu_temp = data.gpu_temp;
+                self.disk_used_pct = data.disk_used_pct;
+                self.disk_free_gb = data.disk_free_gb;
+                self.vol_level = data.vol;
+                self.vol_muted = data.vol_muted;
+                self.bat_capacity = data.bat_capacity;
+                self.bat_status = data.bat_status;
+                self.net_quality = data.net_quality;
+                self.net_type = data.net_type;
+                self.net_ssid = data.net_ssid;
+                self.bluetooth_powered = data.bluetooth_powered;
+                self.bluetooth_device = data.bluetooth_device;
+                self.media_status = data.media_status;
+                self.media_title = data.media_title;
+                self.media_artist = data.media_artist;
+                self.media_player = data.media_player;
             }
             AppMsg::UpdateHyprland {
                 active_ws,
@@ -684,6 +1947,9 @@ impl SimpleComponent for AppModel {
                     .args(["dispatch", "workspace", &ws_id.to_string()])
                     .spawn();
             }
+            AppMsg::SetDeckScreen(screen) => {
+                self.current_screen = screen;
+            }
             AppMsg::ToggleMute => {
                 let _ = std::process::Command::new("wpctl")
                     .args(["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])
@@ -692,13 +1958,214 @@ impl SimpleComponent for AppModel {
                 self.vol_level = vol;
                 self.vol_muted = muted;
             }
+            AppMsg::AdjustVolume(delta) => {
+                let arg = if delta >= 0 {
+                    format!("{}%+", delta)
+                } else {
+                    format!("{}%-", delta.abs())
+                };
+                let _ = std::process::Command::new("wpctl")
+                    .args(["set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", &arg])
+                    .status();
+                let (vol, muted) = read_volume();
+                self.vol_level = vol;
+                self.vol_muted = muted;
+            }
+            AppMsg::ToggleBluetooth => {
+                let new_state = if self.bluetooth_powered { "off" } else { "on" };
+                let _ = std::process::Command::new("bluetoothctl")
+                    .args(["power", new_state])
+                    .status();
+                let (powered, dev) = read_bluetooth();
+                self.bluetooth_powered = powered;
+                self.bluetooth_device = dev;
+                self.bt_devices = read_bluetooth_devices();
+                self.bt_dirty.store(true, Ordering::Relaxed);
+            }
+            AppMsg::ScanBluetooth => {
+                self.bt_scanning = true;
+                let sender_c = _sender.clone();
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("bluetoothctl")
+                        .args(["--timeout", "5", "scan", "on"])
+                        .output();
+                    let devs = read_bluetooth_devices();
+                    sender_c.input(AppMsg::UpdateBtDevices(devs));
+                });
+            }
+            AppMsg::ConnectBluetooth(mac) => {
+                let sender_c = _sender.clone();
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("bluetoothctl")
+                        .args(["connect", &mac])
+                        .output();
+                    let devs = read_bluetooth_devices();
+                    sender_c.input(AppMsg::UpdateBtDevices(devs));
+                });
+            }
+            AppMsg::DisconnectBluetooth(mac) => {
+                let sender_c = _sender.clone();
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("bluetoothctl")
+                        .args(["disconnect", &mac])
+                        .output();
+                    let devs = read_bluetooth_devices();
+                    sender_c.input(AppMsg::UpdateBtDevices(devs));
+                });
+            }
+            AppMsg::UpdateBtDevices(devs) => {
+                self.bt_scanning = false;
+                self.bt_devices = devs;
+                let (powered, dev) = read_bluetooth();
+                self.bluetooth_powered = powered;
+                self.bluetooth_device = dev;
+                self.bt_dirty.store(true, Ordering::Relaxed);
+            }
+            AppMsg::ToggleWifiRadio => {
+                let new_state = if self.wifi_radio_on { "off" } else { "on" };
+                let _ = std::process::Command::new("nmcli")
+                    .args(["radio", "wifi", new_state])
+                    .status();
+                self.wifi_radio_on = !self.wifi_radio_on;
+                self.wifi_networks = read_wifi_networks();
+                let (q, t, s) = read_network();
+                self.net_quality = q;
+                self.net_type = t;
+                self.net_ssid = s;
+                self.wifi_dirty.store(true, Ordering::Relaxed);
+            }
+            AppMsg::RescanWifi => {
+                self.wifi_scanning = true;
+                let sender_c = _sender.clone();
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("nmcli")
+                        .args(["device", "wifi", "rescan"])
+                        .output();
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    let nets = read_wifi_networks();
+                    sender_c.input(AppMsg::UpdateWifiNetworks(nets));
+                });
+            }
+            AppMsg::ConnectWifi(ssid) => {
+                self.wifi_status_msg = Some(format!("CONNECTING TO {}…", ssid));
+                let sender_c = _sender.clone();
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("nmcli")
+                        .args(["connection", "up", "id", &ssid])
+                        .output();
+                    let nets = read_wifi_networks();
+                    sender_c.input(AppMsg::UpdateWifiNetworks(nets));
+                    sender_c.input(AppMsg::WifiActionStatus(None));
+                });
+            }
+            AppMsg::SubmitWifiPassword(pw) => {
+                if let Some(ssid) = self.wifi_selected_ssid.clone() {
+                    self.wifi_status_msg = Some(format!("JOINING {}…", ssid));
+                    let sender_c = _sender.clone();
+                    std::thread::spawn(move || {
+                        let res = std::process::Command::new("nmcli")
+                            .args(["device", "wifi", "connect", &ssid, "password", &pw])
+                            .output();
+                        let nets = read_wifi_networks();
+                        sender_c.input(AppMsg::UpdateWifiNetworks(nets));
+                        match res {
+                            Ok(o) if o.status.success() => {
+                                sender_c.input(AppMsg::SelectWifi(None));
+                                sender_c.input(AppMsg::WifiActionStatus(None));
+                            }
+                            Ok(o) => {
+                                let err = String::from_utf8_lossy(&o.stderr);
+                                let msg = if err.contains("Secrets were required")
+                                    || err.contains("password")
+                                {
+                                    "AUTH FAILED: WRONG PASSWORD".to_string()
+                                } else {
+                                    "CONNECTION FAILED".to_string()
+                                };
+                                sender_c.input(AppMsg::WifiActionStatus(Some(msg)));
+                            }
+                            Err(_) => {
+                                sender_c.input(AppMsg::WifiActionStatus(Some(
+                                    "ERROR RUNNING NMCLI".to_string(),
+                                )));
+                            }
+                        }
+                    });
+                }
+            }
+            AppMsg::DisconnectWifi => {
+                let sender_c = _sender.clone();
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("nmcli")
+                        .args(["device", "disconnect", "wlan0"])
+                        .output();
+                    let nets = read_wifi_networks();
+                    sender_c.input(AppMsg::UpdateWifiNetworks(nets));
+                });
+            }
+            AppMsg::SelectWifi(opt) => {
+                self.wifi_selected_ssid = opt;
+                self.wifi_status_msg = None;
+            }
+            AppMsg::UpdateWifiNetworks(nets) => {
+                self.wifi_scanning = false;
+                self.wifi_networks = nets;
+                let (q, t, s) = read_network();
+                self.net_quality = q;
+                self.net_type = t;
+                self.net_ssid = s;
+                self.wifi_dirty.store(true, Ordering::Relaxed);
+            }
+            AppMsg::WifiActionStatus(status) => {
+                self.wifi_status_msg = status;
+            }
             AppMsg::ToggleMedia => {
+                if let Some(ref mut s) = self.media_status {
+                    if s == "Playing" {
+                        *s = "Paused".to_string();
+                    } else {
+                        *s = "Playing".to_string();
+                    }
+                }
                 let _ = std::process::Command::new("playerctl")
                     .arg("play-pause")
                     .spawn();
             }
-            AppMsg::TriggerPower => {
-                let _ = std::process::Command::new("wlogout").spawn();
+            AppMsg::PrevMedia => {
+                let _ = std::process::Command::new("playerctl")
+                    .arg("previous")
+                    .spawn();
+            }
+            AppMsg::NextMedia => {
+                let _ = std::process::Command::new("playerctl").arg("next").spawn();
+            }
+            AppMsg::ExecLock => {
+                let _ = std::process::Command::new("hyprlock").spawn();
+            }
+            AppMsg::ExecSuspend => {
+                let _ = std::process::Command::new("systemctl")
+                    .arg("suspend")
+                    .spawn();
+            }
+            AppMsg::ExecReboot => {
+                let _ = std::process::Command::new("systemctl")
+                    .arg("reboot")
+                    .spawn();
+            }
+            AppMsg::ExecPoweroff => {
+                let _ = std::process::Command::new("systemctl")
+                    .arg("poweroff")
+                    .spawn();
+            }
+            AppMsg::ExecLogout => {
+                let _ = std::process::Command::new("hyprctl")
+                    .args(["dispatch", "exit"])
+                    .spawn();
+            }
+            AppMsg::TriggerLauncher => {
+                let _ = std::process::Command::new("rofi")
+                    .args(["-show", "drun"])
+                    .spawn();
             }
         }
     }
@@ -732,7 +2199,29 @@ fn read_battery() -> (u32, String) {
     (cap, status)
 }
 
-fn read_network() -> (Option<u32>, String) {
+fn read_network() -> (Option<u32>, String, Option<String>) {
+    let mut ssid = None;
+    if let Ok(out) = std::process::Command::new("nmcli")
+        .args([
+            "-t",
+            "-f",
+            "NAME,TYPE,DEVICE",
+            "connection",
+            "show",
+            "--active",
+        ])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split(':').collect();
+            if parts.len() >= 2 && parts[1].contains("wireless") {
+                ssid = Some(parts[0].to_string());
+                break;
+            }
+        }
+    }
+
     if let Ok(content) = std::fs::read_to_string("/proc/net/wireless") {
         for line in content.lines() {
             if line.contains("wlan0:") {
@@ -741,7 +2230,7 @@ fn read_network() -> (Option<u32>, String) {
                     let qual_str = parts[2].trim_end_matches('.');
                     if let Ok(qual) = qual_str.parse::<f32>() {
                         let pct = ((qual / 70.0) * 100.0).min(100.0) as u32;
-                        return (Some(pct), "WIFI".to_string());
+                        return (Some(pct), "WIFI".to_string(), ssid);
                     }
                 }
             }
@@ -749,52 +2238,303 @@ fn read_network() -> (Option<u32>, String) {
     }
     if let Ok(state) = std::fs::read_to_string("/sys/class/net/eno1/operstate") {
         if state.trim() == "up" {
-            return (Some(100), "ETH".to_string());
+            return (Some(100), "ETH".to_string(), None);
         }
     }
     if let Ok(state) = std::fs::read_to_string("/sys/class/net/wlan0/operstate") {
         if state.trim() == "up" {
-            return (Some(100), "WIFI".to_string());
+            return (Some(100), "WIFI".to_string(), ssid);
         }
     }
-    (None, "OFF".to_string())
+    (None, "OFF".to_string(), None)
 }
 
-fn read_media() -> Option<(String, String)> {
-    let status_out = std::process::Command::new("playerctl")
-        .arg("status")
+fn read_bluetooth() -> (bool, Option<String>) {
+    let mut powered = false;
+    if let Ok(out) = std::process::Command::new("bluetoothctl")
+        .arg("show")
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        powered = text.contains("Powered: yes");
+    }
+
+    let mut device = None;
+    if powered {
+        if let Ok(out) = std::process::Command::new("bluetoothctl")
+            .args(["devices", "Connected"])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout);
+            if let Some(line) = text.lines().next() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    device = Some(parts[2..].join(" "));
+                }
+            }
+        }
+    }
+
+    (powered, device)
+}
+
+fn read_wifi_radio() -> bool {
+    if let Ok(out) = std::process::Command::new("nmcli")
+        .args(["radio", "wifi"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        return text.trim() == "enabled";
+    }
+    true
+}
+
+fn read_wifi_networks() -> Vec<WifiNetworkInfo> {
+    let saved_conns: std::collections::HashSet<String> = std::process::Command::new("nmcli")
+        .args(["-t", "-f", "NAME,TYPE", "connection", "show"])
+        .output()
+        .ok()
+        .map(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|l| {
+                    let mut parts = l.split(':');
+                    let name = parts.next()?;
+                    let conn_type = parts.next().unwrap_or("");
+                    if conn_type.contains("wireless") || conn_type.contains("802-11") {
+                        Some(name.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut networks_map: std::collections::HashMap<String, WifiNetworkInfo> =
+        std::collections::HashMap::new();
+
+    if let Ok(out) = std::process::Command::new("nmcli")
+        .args([
+            "-t",
+            "-f",
+            "IN-USE,SSID,SIGNAL,SECURITY",
+            "device",
+            "wifi",
+            "list",
+        ])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split(':').collect();
+            if parts.len() >= 4 {
+                let in_use = parts[0].contains('*');
+                let ssid = parts[1].trim().to_string();
+                if ssid.is_empty() {
+                    continue;
+                }
+                let signal = parts[2].trim().parse::<u32>().unwrap_or(0);
+                let security = parts[3].trim().to_string();
+                let is_known = saved_conns.contains(&ssid);
+
+                let info = WifiNetworkInfo {
+                    in_use,
+                    ssid: ssid.clone(),
+                    signal,
+                    security,
+                    is_known,
+                };
+
+                match networks_map.get_mut(&ssid) {
+                    Some(existing) => {
+                        if in_use || (!existing.in_use && signal > existing.signal) {
+                            *existing = info;
+                        }
+                    }
+                    None => {
+                        networks_map.insert(ssid, info);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut list: Vec<WifiNetworkInfo> = networks_map.into_values().collect();
+    list.sort_by(|a, b| {
+        b.in_use
+            .cmp(&a.in_use)
+            .then_with(|| b.is_known.cmp(&a.is_known))
+            .then_with(|| b.signal.cmp(&a.signal))
+            .then_with(|| a.ssid.cmp(&b.ssid))
+    });
+    list
+}
+
+fn read_bluetooth_devices() -> Vec<BtDeviceInfo> {
+    let mut connected_set = std::collections::HashSet::new();
+    if let Ok(out) = std::process::Command::new("bluetoothctl")
+        .args(["devices", "Connected"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 && parts[0] == "Device" {
+                connected_set.insert(parts[1].to_uppercase());
+            }
+        }
+    }
+
+    let mut paired_set = std::collections::HashSet::new();
+    if let Ok(out) = std::process::Command::new("bluetoothctl")
+        .args(["devices", "Paired"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 && parts[0] == "Device" {
+                paired_set.insert(parts[1].to_uppercase());
+            }
+        }
+    }
+
+    let mut devices = Vec::new();
+    let mut seen_macs = std::collections::HashSet::new();
+
+    if let Ok(out) = std::process::Command::new("bluetoothctl")
+        .args(["devices"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 && parts[0] == "Device" {
+                let mac = parts[1].to_uppercase();
+                let name = parts[2..].join(" ");
+                let connected = connected_set.contains(&mac);
+                let paired = paired_set.contains(&mac) || true;
+                if seen_macs.insert(mac.clone()) {
+                    devices.push(BtDeviceInfo {
+                        mac,
+                        name,
+                        connected,
+                        paired,
+                    });
+                }
+            }
+        }
+    }
+
+    devices.sort_by(|a, b| {
+        b.connected
+            .cmp(&a.connected)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    devices
+}
+
+fn read_cpu_temp() -> Option<u32> {
+    if let Ok(entries) = std::fs::read_dir("/sys/class/hwmon") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Ok(name) = std::fs::read_to_string(path.join("name")) {
+                if name.trim() == "coretemp" {
+                    if let Ok(temp_str) = std::fs::read_to_string(path.join("temp1_input")) {
+                        if let Ok(temp_milli) = temp_str.trim().parse::<u32>() {
+                            return Some(temp_milli / 1000);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn read_gpu() -> (Option<u32>, Option<u32>, Option<u32>, Option<u32>) {
+    if let Ok(out) = std::process::Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
+            "--format=csv,noheader,nounits",
+        ])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        if let Some(line) = text.lines().next() {
+            let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+            if parts.len() >= 4 {
+                let util = parts[0].parse::<u32>().ok();
+                let used = parts[1].parse::<u32>().ok();
+                let total = parts[2].parse::<u32>().ok();
+                let temp = parts[3].parse::<u32>().ok();
+                return (util, used, total, temp);
+            }
+        }
+    }
+    (None, None, None, None)
+}
+
+fn read_disk() -> (u32, u32) {
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    for disk in &disks {
+        if disk.mount_point() == std::path::Path::new("/") {
+            let total = disk.total_space();
+            let avail = disk.available_space();
+            if total > 0 {
+                let used = total.saturating_sub(avail);
+                let pct = ((used as f64 / total as f64) * 100.0).round() as u32;
+                let free_gb = (avail / (1024 * 1024 * 1024)) as u32;
+                return (pct, free_gb);
+            }
+        }
+    }
+    (0, 0)
+}
+
+fn read_media() -> Option<(String, String, Option<String>, Option<String>)> {
+    let out = std::process::Command::new("playerctl")
+        .args([
+            "metadata",
+            "--format",
+            "{{status}}:::{{artist}}:::{{title}}:::{{playerName}}",
+        ])
         .output()
         .ok()?;
-    if !status_out.status.success() {
+    if !out.status.success() {
         return None;
     }
-    let status = String::from_utf8_lossy(&status_out.stdout)
-        .trim()
-        .to_string();
+    let text = String::from_utf8_lossy(&out.stdout);
+    let line = text.lines().next()?.trim();
+    if line.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = line.split(":::").collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let status = parts[0].trim().to_string();
     if status != "Playing" && status != "Paused" {
         return None;
     }
-    let title_out = std::process::Command::new("playerctl")
-        .args(["metadata", "--format", "{{artist}} - {{title}}"])
-        .output()
-        .ok()?;
-    let mut title = String::from_utf8_lossy(&title_out.stdout)
-        .trim()
-        .to_string();
-    if title.is_empty() || title == " - " {
-        if let Ok(meta_title) = std::process::Command::new("playerctl")
-            .args(["metadata", "title"])
-            .output()
-        {
-            title = String::from_utf8_lossy(&meta_title.stdout)
-                .trim()
-                .to_string();
-        }
-    }
+    let artist = if parts[1].trim().is_empty() {
+        None
+    } else {
+        Some(parts[1].trim().to_string())
+    };
+    let title = parts[2].trim().to_string();
     if title.is_empty() {
         return None;
     }
-    Some((status, title))
+    let player = if parts.len() >= 4 && !parts[3].trim().is_empty() {
+        Some(parts[3].trim().to_string())
+    } else {
+        None
+    };
+
+    Some((status, title, artist, player))
 }
 
 fn hypr_request(cmd: &[u8]) -> Option<Vec<u8>> {
@@ -929,6 +2669,9 @@ fn main() {
     while i < args.len() {
         if args[i] == "--monitor" && i + 1 < args.len() {
             target_monitor = Some(args[i + 1].clone());
+            i += 1;
+        } else if args[i] == "--screen" && i + 1 < args.len() {
+            std::env::set_var("TAKT_SCREEN", &args[i + 1]);
             i += 1;
         }
         i += 1;

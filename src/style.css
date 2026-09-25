@@ -1,29 +1,31 @@
 /* ==========================================================================
    Takt: SOTA Micrographic Wayland Telemetry Deck (GTK4 CSS)
-   Teenage Engineering & Nothing OS Industrial Vernacular
-   Strict adherence to user swatch tokens:
-   - #141C10 : Void Black Chassis (100% Solid Opaque)
-   - #999208 : Acid Olive / Chartreuse Phosphor
-   - #D8A664 : Warm Ochre / Apricot Anodized Accent
-   - #5A6042 : Weathered Army Moss / Structural Border
-   - #3b442b : Sub-border / Panel Milled Lines
-   - #1c2517 : Machined Pod Panel
-   - #25301e : Panel Hover / Occupied State
-   - #D1CF8B : Pistachio Cream / Telemetry Secondary
-   - #FBFFE1 : Bone Ivory / Primary Display Readout
-   - #BE5D3C : Industrial Hazard Vermilion / Mute / Alert
+   Teenage Engineering, Nothing OS, and s1re Brand Flat Industrial Vernacular
+   Canonical s1re Brand Tokens:
+   - #141C10 : Ink Void Chassis (Deep Chlorophyll Black)
+   - #172213 : Solid Flat Milled Panel Base
+   - #222e1b : Panel Hover / Occupied State
+   - #28351f : Hairline Sub-border / Panel Milled Grooves
+   - #38462b : Structural Milled Bezel Frame
+   - #5A6042 : Weathered Army Moss / Accent Bracket
+   - #999208 : Acid Phosphor Chartreuse (Prompt / Active Channel)
+   - #D8A664 : Warm Anodized Ochre Amber (Brand Accent / Cursor)
+   - #D1CF8B : Pistachio Khaki (Secondary Telemetry / Subtitles)
+   - #FBFFE1 : Bone Electric Ivory (High-Contrast Readouts)
+   - #BE5D3C : Industrial Hazard Vermilion (Mute / Alert / Low Bat)
    ========================================================================== */
 
-@define-color sota-void        #141C10;
-@define-color sota-acid        #999208;
-@define-color sota-ochre       #D8A664;
-@define-color sota-border      #5A6042;
-@define-color sota-border-sub  #3b442b;
-@define-color sota-panel       #1c2517;
-@define-color sota-panel-hover #25301e;
-@define-color sota-pista       #D1CF8B;
-@define-color sota-bone        #FBFFE1;
-@define-color sota-crit        #BE5D3C;
+@define-color sota-void         #141C10;
+@define-color sota-panel        #172213;
+@define-color sota-panel-hover  #222e1b;
+@define-color sota-border-sub   #28351f;
+@define-color sota-border       #38462b;
+@define-color sota-border-hover #5A6042;
+@define-color sota-acid         #999208;
+@define-color sota-ochre        #D8A664;
+@define-color sota-khaki        #D1CF8B;
+@define-color sota-bone         #FBFFE1;
+@define-color sota-crit         #BE5D3C;
 
 * {
 	all: unset;
@@ -33,31 +35,59 @@
 
 window.takt-bar {
 	background-color: @sota-void;
-	border-bottom: 1px solid #2c3620;
-	box-shadow: 0 1px 0 #141C10;
+	border-bottom: 1px solid #1e2617;
 	padding: 0;
 	margin: 0;
 }
 
 .takt-rail {
-	padding: 3px 12px;
+	padding: 3px 8px;
 	background-color: @sota-void;
 }
 
 /* --------------------------------------------------------------------------
-   Tactile Pods (Milled Machined Chassis)
+   Tactile Pods (Pure Flat Matte Machined Chassis - Zero 3D)
    -------------------------------------------------------------------------- */
 
-box.tactile-pod {
+box.tactile-pod,
+button.tactile-pod,
+menubutton.tactile-pod {
 	background-color: @sota-panel;
-	border: 1px solid @sota-border-sub;
+	border: 1px solid @sota-border;
 	border-radius: 2px;
-	box-shadow: inset 0 1px 0 rgba(216, 166, 100, 0.08);
-	transition: all 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+	transition: border-color 0.12s ease-in-out, background-color 0.12s ease-in-out;
 }
 
-box.tactile-pod:hover {
-	border-color: @sota-border;
+box.tactile-pod:hover,
+button.tactile-pod:hover,
+menubutton.tactile-pod:hover {
+	border-color: @sota-border-hover;
+	background-color: @sota-panel-hover;
+}
+
+menubutton.tactile-pod > button {
+	background: transparent;
+	border: none;
+	padding: 2px 8px;
+}
+
+/* --------------------------------------------------------------------------
+   Brand Anchor Pod
+   -------------------------------------------------------------------------- */
+
+button.pod-brand {
+	padding: 2px 10px 2px 8px;
+	border-color: rgba(216, 166, 100, 0.35);
+	background-color: @sota-panel;
+}
+
+button.pod-brand:hover {
+	border-color: @sota-ochre;
+	background-color: @sota-panel-hover;
+}
+
+button.pod-brand:active {
+	background-color: #2b3922;
 }
 
 /* --------------------------------------------------------------------------
@@ -71,40 +101,40 @@ box.pod-workspaces {
 button.ws-btn {
 	border-radius: 2px;
 	min-width: 22px;
-	min-height: 22px;
-	padding: 2px 6px;
-	margin: 1px 2px;
+	min-height: 20px;
+	padding: 1px 5px;
+	margin: 1px 1px;
 	background: transparent;
 	border: 1px solid transparent;
 	font-family: "Geist Mono", monospace;
-	font-weight: 800;
-	font-size: 11px;
-	transition: all 0.12s cubic-bezier(0.2, 0.8, 0.2, 1);
+	font-weight: 700;
+	font-size: 10.5px;
+	transition: all 0.12s ease-in-out;
 }
 
 button.ws-btn.empty {
-	color: #485239;
+	color: #3e4832;
 	background: transparent;
 	border-color: transparent;
 }
 
 button.ws-btn.occupied {
-	background-color: @sota-panel-hover;
-	border: 1px solid @sota-border-sub;
-	color: @sota-pista;
+	background-color: #1a2415;
+	border: 1px solid #333f27;
+	color: @sota-khaki;
 }
 
 button.ws-btn.occupied:hover {
 	border-color: @sota-border;
 	color: @sota-bone;
+	background-color: @sota-panel-hover;
 }
 
 button.ws-btn.active {
 	background-color: @sota-ochre;
-	border-color: @sota-ochre;
+	border: 1px solid @sota-ochre;
 	color: @sota-void;
 	font-weight: 900;
-	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 /* --------------------------------------------------------------------------
@@ -112,8 +142,7 @@ button.ws-btn.active {
    -------------------------------------------------------------------------- */
 
 box.pod-window {
-	padding: 3px 12px;
-	box-shadow: inset 0 1px 0 rgba(153, 146, 8, 0.08);
+	padding: 3px 10px;
 }
 
 box.pod-window:hover {
@@ -121,70 +150,208 @@ box.pod-window:hover {
 }
 
 /* --------------------------------------------------------------------------
-   Master Chronometer Pod
+   Master Chronometer Pod (Center)
    -------------------------------------------------------------------------- */
 
 box.pod-clock {
-	padding: 3px 18px;
-	border-color: @sota-border;
-	box-shadow: inset 0 1px 0 rgba(216, 166, 100, 0.15);
+	padding: 3px 14px;
+	border-color: #3b492e;
 }
 
 box.pod-clock:hover {
 	border-color: @sota-ochre;
-	box-shadow: 0 0 12px rgba(216, 166, 100, 0.2), inset 0 1px 0 rgba(216, 166, 100, 0.25);
 }
 
 /* --------------------------------------------------------------------------
-   Media / MPRIS Pod
+   Media / MPRIS Pod (Compact HUD)
    -------------------------------------------------------------------------- */
 
 box.pod-media {
-	padding: 0;
+	padding: 2px 6px;
+	background-color: #162012;
+	border: 1px solid #29381e;
 }
 
-button.media-btn {
-	padding: 3px 12px;
+button.media-ctrl-btn {
+	padding: 1px 4px;
 	background: transparent;
 	border: none;
 	border-radius: 2px;
 	transition: background-color 0.12s ease-in-out;
 }
 
-button.media-btn:hover {
+button.media-ctrl-btn:hover {
 	background-color: @sota-panel-hover;
+}
+
+button.media-ctrl-btn:active {
+	background-color: #2b3922;
+}
+
+.media-title-label {
+	padding: 0 4px;
 }
 
 /* --------------------------------------------------------------------------
-   Unified Hardware Instrument Deck
+   Deck Selector Chips Pod (4-Screen Architecture)
    -------------------------------------------------------------------------- */
 
-box.pod-hardware {
-	padding: 0;
+box.pod-deck-selector {
+	padding: 2px 2px;
+	background-color: #12190e;
+	border: 1px solid #25311b;
 }
 
-label.instrument-cell,
-button.instrument-btn {
-	padding: 3px 11px;
+button.deck-chip {
+	padding: 1px 6px;
+	margin: 0 1px;
+	border-radius: 2px;
+	transition: all 0.12s ease-in-out;
+}
+
+button.deck-chip.idle {
 	background: transparent;
-	border: none;
-	border-right: 1px solid @sota-border-sub;
-	border-radius: 0;
-	margin: 0;
-	transition: background-color 0.12s ease-in-out;
+	border: 1px solid transparent;
+	color: #5A6042;
 }
 
-label.instrument-cell:hover,
+button.deck-chip.idle:hover {
+	background-color: @sota-panel-hover;
+	border-color: @sota-border-sub;
+	color: @sota-bone;
+}
+
+button.deck-chip.active {
+	background-color: #23301a;
+	border: 1px solid @sota-acid;
+	color: @sota-bone;
+}
+
+/* --------------------------------------------------------------------------
+   Actionable Instrument Cells (Bluetooth, Network, Volume, Power)
+   -------------------------------------------------------------------------- */
+
+button.instrument-btn {
+	padding: 2px 8px;
+	background-color: @sota-panel;
+}
+
 button.instrument-btn:hover {
 	background-color: @sota-panel-hover;
+	border-color: @sota-border-hover;
 }
 
-button.instrument-btn:active {
-	background-color: #313d28;
+menubutton.pod-vol > button,
+menubutton.pod-bt > button {
+	padding: 2px 8px;
 }
 
-box.pod-hardware > :last-child {
-	border-right: none;
+button.pod-power,
+menubutton.pod-power {
+	border-color: rgba(190, 93, 60, 0.4);
+	background-color: @sota-panel;
+}
+
+button.pod-power:hover,
+menubutton.pod-power:hover {
+	border-color: @sota-crit;
+	background-color: #2a1612;
+}
+
+menubutton.pod-power > button {
+	padding: 2px 9px;
+}
+
+/* --------------------------------------------------------------------------
+   Tactile Popover HUDs (Volume, Bluetooth, Power)
+   -------------------------------------------------------------------------- */
+
+popover.tactile-popover > contents {
+	background-color: #11180e;
+	border: 1px solid @sota-border;
+	border-radius: 3px;
+	padding: 8px 10px;
+	box-shadow: none;
+}
+
+popover.tactile-popover arrow {
+	background: transparent;
+	border-color: transparent;
+}
+
+.popover-content {
+	min-width: 170px;
+}
+
+button.menu-action-btn {
+	padding: 5px 8px;
+	border-radius: 2px;
+	background-color: @sota-panel;
+	border: 1px solid @sota-border-sub;
+	transition: all 0.12s ease-in-out;
+}
+
+button.menu-action-btn:hover {
+	background-color: @sota-panel-hover;
+	border-color: @sota-border-hover;
+}
+
+button.menu-action-btn.btn-danger:hover {
+	background-color: #2a1612;
+	border-color: @sota-crit;
+}
+
+button.quick-vol-btn {
+	padding: 3px 6px;
+	border-radius: 2px;
+	background-color: @sota-panel;
+	border: 1px solid @sota-border-sub;
+	transition: all 0.12s ease-in-out;
+}
+
+button.quick-vol-btn:hover {
+	background-color: @sota-panel-hover;
+	border-color: @sota-ochre;
+}
+
+/* --------------------------------------------------------------------------
+   Screens 2, 3, 4 Cockpit Styling (Perf, Cal, Studio Media)
+   -------------------------------------------------------------------------- */
+
+box.pod-perf-cell {
+	padding: 3px 8px;
+}
+
+box.pod-perf-cell:hover {
+	border-color: @sota-border-hover;
+}
+
+box.pod-cal-summary {
+	padding: 3px 12px;
+	border-color: #3b492e;
+}
+
+box.pod-cal-summary:hover {
+	border-color: @sota-ochre;
+}
+
+box.pod-week-ribbon {
+	padding: 2px 4px;
+	background-color: #12190e;
+	border: 1px solid #25311b;
+}
+
+box.pod-studio-track {
+	padding: 3px 12px;
+	border-color: #3b492e;
+}
+
+box.pod-studio-track:hover {
+	border-color: @sota-ochre;
+}
+
+box.pod-studio-transport {
+	padding: 2px 6px;
 }
 
 /* --------------------------------------------------------------------------
@@ -192,7 +359,11 @@ box.pod-hardware > :last-child {
    -------------------------------------------------------------------------- */
 
 window.compact .takt-rail {
-	padding: 3px 6px;
+	padding: 2px 5px;
+}
+
+window.compact button.pod-brand {
+	padding: 2px 6px;
 }
 
 window.compact box.pod-workspaces {
@@ -200,24 +371,174 @@ window.compact box.pod-workspaces {
 }
 
 window.compact button.ws-btn {
-	padding: 2px 4px;
+	padding: 1px 4px;
 	min-width: 18px;
 	margin: 1px 1px;
 }
 
 window.compact box.pod-window {
-	padding: 3px 8px;
+	padding: 2px 7px;
 }
 
 window.compact box.pod-clock {
-	padding: 3px 10px;
+	padding: 2px 9px;
 }
 
 window.compact button.media-btn {
-	padding: 3px 8px;
+	padding: 2px 7px;
 }
 
-window.compact label.instrument-cell,
-window.compact button.instrument-btn {
+window.compact .instrument-cell {
+	padding: 2px 5px;
+}
+
+window.compact button.pod-power {
+	padding: 2px 7px;
+}
+
+/* --------------------------------------------------------------------------
+   Embedded Bluetooth & Wi-Fi Decks (Tactile 2D Popovers)
+   -------------------------------------------------------------------------- */
+
+.deck-bt-popover,
+.deck-wifi-popover {
+	min-width: 320px;
+	padding: 4px 6px;
+}
+
+button.deck-ctrl-btn {
+	padding: 2px 7px;
+	border-radius: 2px;
+	background-color: @sota-panel;
+	border: 1px solid @sota-border-sub;
+	transition: all 0.12s ease-in-out;
+}
+
+button.deck-ctrl-btn:hover {
+	background-color: @sota-panel-hover;
+	border-color: @sota-border-hover;
+}
+
+box.deck-status-capsule {
 	padding: 3px 6px;
+	background-color: #11180d;
+	border: 1px solid #202b17;
+	border-radius: 2px;
+}
+
+box.deck-active-capsule {
+	padding: 4px 8px;
+	background-color: #172414;
+	border: 1px solid #334424;
+	border-radius: 2px;
+}
+
+scrolledwindow.deck-scrolled-list {
+	background-color: #10160c;
+	border: 1px solid #1f2a17;
+	border-radius: 2px;
+	padding: 3px;
+}
+
+box.bt-device-row,
+box.wifi-network-row {
+	padding: 3px 6px;
+	background-color: #141c10;
+	border: 1px solid #222e1b;
+	border-radius: 2px;
+	transition: all 0.12s ease-in-out;
+}
+
+box.bt-device-row:hover,
+box.wifi-network-row:hover {
+	background-color: #1c2716;
+	border-color: #38462b;
+}
+
+button.btn-action-connect {
+	padding: 2px 8px;
+	border-radius: 2px;
+	background-color: @sota-ochre;
+	border: 1px solid @sota-ochre;
+	transition: all 0.12s ease-in-out;
+}
+
+button.btn-action-connect:hover {
+	background-color: @sota-bone;
+	border-color: @sota-bone;
+}
+
+button.btn-action-disconnect {
+	padding: 2px 8px;
+	border-radius: 2px;
+	background-color: #241310;
+	border: 1px solid @sota-crit;
+	transition: all 0.12s ease-in-out;
+}
+
+button.btn-action-disconnect:hover {
+	background-color: #341813;
+	border-color: #e26744;
+}
+
+button.btn-action-join {
+	padding: 2px 8px;
+	border-radius: 2px;
+	background-color: #192414;
+	border: 1px solid #38462b;
+	transition: all 0.12s ease-in-out;
+}
+
+button.btn-action-join:hover {
+	background-color: #24341d;
+	border-color: @sota-ochre;
+}
+
+box.wifi-pw-box {
+	padding: 6px 8px;
+	background-color: #12190e;
+	border: 1px solid @sota-ochre;
+	border-radius: 2px;
+	margin-top: 4px;
+}
+
+passwordentry.wifi-pw-input {
+	background-color: #172213;
+	border: 1px solid #38462b;
+	border-radius: 2px;
+	padding: 3px 6px;
+	color: @sota-bone;
+	font-family: "Geist Mono", monospace;
+	font-size: 8.5pt;
+}
+
+passwordentry.wifi-pw-input:focus-within {
+	border-color: @sota-ochre;
+	background-color: #1a2715;
+}
+
+button.pw-btn-cancel {
+	padding: 2px 8px;
+	border-radius: 2px;
+	background-color: #172213;
+	border: 1px solid #28351f;
+	transition: all 0.12s ease-in-out;
+}
+
+button.pw-btn-cancel:hover {
+	background-color: @sota-panel-hover;
+	border-color: @sota-border-hover;
+}
+
+button.pw-btn-join {
+	padding: 2px 10px;
+	border-radius: 2px;
+	background-color: @sota-ochre;
+	border: 1px solid @sota-ochre;
+	transition: all 0.12s ease-in-out;
+}
+
+button.pw-btn-join:hover {
+	background-color: @sota-bone;
+	border-color: @sota-bone;
 }

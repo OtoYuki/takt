@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Tactical Viewfinder Frame Brackets -->
+  <path d="M 2,5 L 2,2 L 5,2 M 11,2 L 14,2 L 14,5 M 14,11 L 14,14 L 11,14 M 5,14 L 2,14 L 2,11" 
+        fill="none" stroke="#D1CF8B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Central Target Reticle -->
+  <circle cx="8" cy="8" r="1.8" fill="#999208"/>
+  <line x1="8" y1="4.5" x2="8" y2="5.5" stroke="#D8A664" stroke-width="1.2"/>
+  <line x1="8" y1="10.5" x2="8" y2="11.5" stroke="#D8A664" stroke-width="1.2"/>
+  <line x1="4.5" y1="8" x2="5.5" y2="8" stroke="#D8A664" stroke-width="1.2"/>
+  <line x1="10.5" y1="8" x2="11.5" y2="8" stroke="#D8A664" stroke-width="1.2"/>
+</svg>
