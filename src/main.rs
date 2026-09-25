@@ -37,6 +37,45 @@ pub enum DeckScreen {
     Media = 4,
 }
 
+impl DeckScreen {
+    pub fn next(&self) -> Self {
+        match self {
+            DeckScreen::Sys => DeckScreen::Perf,
+            DeckScreen::Perf => DeckScreen::Cal,
+            DeckScreen::Cal => DeckScreen::Media,
+            DeckScreen::Media => DeckScreen::Sys,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            DeckScreen::Sys => DeckScreen::Media,
+            DeckScreen::Perf => DeckScreen::Sys,
+            DeckScreen::Cal => DeckScreen::Perf,
+            DeckScreen::Media => DeckScreen::Cal,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DeckScreen::Sys => "sys",
+            DeckScreen::Perf => "perf",
+            DeckScreen::Cal => "cal",
+            DeckScreen::Media => "media",
+        }
+    }
+
+    pub fn from_str_name(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "1" | "sys" | "system" => Some(DeckScreen::Sys),
+            "2" | "perf" | "performance" => Some(DeckScreen::Perf),
+            "3" | "cal" | "calendar" | "chrono" => Some(DeckScreen::Cal),
+            "4" | "media" | "mpris" => Some(DeckScreen::Media),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BtDeviceInfo {
     pub mac: String,
@@ -55,7 +94,7 @@ pub struct WifiNetworkInfo {
 }
 
 struct AppModel {
-    _target_monitor: String,
+    target_monitor: String,
     ws_base: u32,
     is_compact: bool,
     current_screen: DeckScreen,
@@ -150,6 +189,8 @@ enum AppMsg {
     },
     SwitchWorkspaceSlot(u32),
     SetDeckScreen(DeckScreen),
+    SetDeckScreenRemote(DeckScreen),
+    CycleDeckScreen(i32),
     ToggleMute,
     AdjustVolume(i32),
 
@@ -636,6 +677,7 @@ impl SimpleComponent for AppModel {
                     set_valign: gtk4::Align::Center,
 
                     // SCREEN 01: SYS (Master Chrono HUD)
+                    #[name = "screen_sys_box"]
                     gtk4::Box {
                         set_orientation: gtk4::Orientation::Horizontal,
                         set_spacing: 8,
@@ -657,6 +699,7 @@ impl SimpleComponent for AppModel {
                     },
 
                     // SCREEN 02: PERF (Hardware Telemetry Cockpit)
+                    #[name = "screen_perf_box"]
                     gtk4::Box {
                         set_orientation: gtk4::Orientation::Horizontal,
                         set_spacing: 6,
@@ -750,6 +793,7 @@ impl SimpleComponent for AppModel {
                     },
 
                     // SCREEN 03: CAL (Chrono & Calendar Ribbon)
+                    #[name = "screen_cal_box"]
                     gtk4::Box {
                         set_orientation: gtk4::Orientation::Horizontal,
                         set_spacing: 6,
@@ -792,6 +836,7 @@ impl SimpleComponent for AppModel {
                     },
 
                     // SCREEN 04: MEDIA (Expanded Studio Media Deck)
+                    #[name = "screen_media_box"]
                     gtk4::Box {
                         set_orientation: gtk4::Orientation::Horizontal,
                         set_spacing: 6,
@@ -908,6 +953,7 @@ impl SimpleComponent for AppModel {
                     },
 
                     // 4 Screens Deck Selector Pod
+                    #[name = "pod_deck_selector"]
                     gtk4::Box {
                         set_orientation: gtk4::Orientation::Horizontal,
                         set_valign: gtk4::Align::Center,
@@ -1686,14 +1732,12 @@ impl SimpleComponent for AppModel {
             read_hyprland_state_fast(&target_monitor);
 
         let now = chrono::Local::now();
-        let initial_screen = match std::env::var("TAKT_SCREEN").as_deref() {
-            Ok("2") | Ok("perf") => DeckScreen::Perf,
-            Ok("3") | Ok("cal") => DeckScreen::Cal,
-            Ok("4") | Ok("media") => DeckScreen::Media,
-            _ => DeckScreen::Sys,
-        };
+        let initial_screen = std::env::var("TAKT_SCREEN")
+            .ok()
+            .and_then(|s| DeckScreen::from_str_name(&s))
+            .unwrap_or(DeckScreen::Sys);
         let model = AppModel {
-            _target_monitor: target_monitor.clone(),
+            target_monitor: target_monitor.clone(),
             ws_base,
             is_compact,
             current_screen: initial_screen,
@@ -1749,6 +1793,92 @@ impl SimpleComponent for AppModel {
         };
 
         let widgets = view_output!();
+
+        // Mouse Wheel Scroll Controller for cockpit deck cycling
+        let last_scroll = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
+        attach_scroll_cycle(
+            &widgets.pod_deck_selector,
+            sender.clone(),
+            last_scroll.clone(),
+        );
+        attach_scroll_cycle(&widgets.screen_sys_box, sender.clone(), last_scroll.clone());
+        attach_scroll_cycle(
+            &widgets.screen_perf_box,
+            sender.clone(),
+            last_scroll.clone(),
+        );
+        attach_scroll_cycle(&widgets.screen_cal_box, sender.clone(), last_scroll.clone());
+        attach_scroll_cycle(&widgets.screen_media_box, sender.clone(), last_scroll);
+
+        // IPC Server Listener for multi-monitor synchronization & CLI commands
+        let sock_path = get_monitor_socket_path(&target_monitor);
+        let _ = std::fs::remove_file(&sock_path);
+        let sender_ipc = sender.clone();
+        let mon_for_ipc = target_monitor.clone();
+
+        std::thread::spawn(move || {
+            if let Ok(listener) = std::os::unix::net::UnixListener::bind(&sock_path) {
+                if !mon_for_ipc.starts_with("eDP") {
+                    let runtime = std::env::var("XDG_RUNTIME_DIR")
+                        .unwrap_or_else(|_| "/run/user/1000".to_string());
+                    let global_sock = std::path::PathBuf::from(runtime).join("takt.sock");
+                    let _ = std::fs::remove_file(&global_sock);
+                    let _ = std::os::unix::fs::symlink(&sock_path, &global_sock);
+                }
+
+                for stream in listener.incoming().flatten() {
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(500)));
+                    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(500)));
+                    let mut reader = BufReader::new(stream);
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).is_ok() {
+                        let trimmed = line.trim();
+                        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                        if let Some(cmd) = parts.first() {
+                            match cmd.to_ascii_uppercase().as_str() {
+                                "NEXT" => {
+                                    sender_ipc.input(AppMsg::CycleDeckScreen(1));
+                                    let mut s = reader.into_inner();
+                                    let _ = s.write_all(b"OK NEXT\n");
+                                }
+                                "PREV" => {
+                                    sender_ipc.input(AppMsg::CycleDeckScreen(-1));
+                                    let mut s = reader.into_inner();
+                                    let _ = s.write_all(b"OK PREV\n");
+                                }
+                                "SET" => {
+                                    if let Some(target) = parts.get(1) {
+                                        if let Some(screen) = DeckScreen::from_str_name(target) {
+                                            sender_ipc.input(AppMsg::SetDeckScreenRemote(screen));
+                                            let mut s = reader.into_inner();
+                                            let _ = s.write_all(
+                                                format!("OK {}\n", screen.as_str()).as_bytes(),
+                                            );
+                                        }
+                                    }
+                                }
+                                "SCREEN" => {
+                                    if let Some(target) = parts.get(1) {
+                                        if let Some(screen) = DeckScreen::from_str_name(target) {
+                                            sender_ipc.input(AppMsg::SetDeckScreen(screen));
+                                            let mut s = reader.into_inner();
+                                            let _ = s.write_all(
+                                                format!("OK {}\n", screen.as_str()).as_bytes(),
+                                            );
+                                        }
+                                    }
+                                }
+                                "PING" => {
+                                    let mut s = reader.into_inner();
+                                    let _ = s.write_all(b"PONG\n");
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        });
 
         // Background Telemetry Worker (every 1 sec)
         let sender_telemetry = sender.clone();
@@ -1947,7 +2077,20 @@ impl SimpleComponent for AppModel {
                     .args(["dispatch", "workspace", &ws_id.to_string()])
                     .spawn();
             }
+            AppMsg::CycleDeckScreen(delta) => {
+                let new_screen = if delta > 0 {
+                    self.current_screen.next()
+                } else {
+                    self.current_screen.prev()
+                };
+                self.current_screen = new_screen;
+                broadcast_ipc_screen_change(new_screen, Some(&self.target_monitor));
+            }
             AppMsg::SetDeckScreen(screen) => {
+                self.current_screen = screen;
+                broadcast_ipc_screen_change(screen, Some(&self.target_monitor));
+            }
+            AppMsg::SetDeckScreenRemote(screen) => {
                 self.current_screen = screen;
             }
             AppMsg::ToggleMute => {
@@ -2662,8 +2805,240 @@ fn run_monitor(mon_name: String) {
     app.run::<AppModel>(mon_name);
 }
 
+fn attach_scroll_cycle<W: gtk4::prelude::WidgetExt>(
+    widget: &W,
+    sender: ComponentSender<AppModel>,
+    last_scroll: std::sync::Arc<std::sync::atomic::AtomicI64>,
+) {
+    let controller = gtk4::EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
+    controller.connect_scroll(move |_, _dx, dy| {
+        let now_us = gtk4::glib::monotonic_time();
+        let prev_us = last_scroll.load(std::sync::atomic::Ordering::Relaxed);
+        if (now_us - prev_us).abs() > 100_000 {
+            if dy > 0.0 {
+                last_scroll.store(now_us, std::sync::atomic::Ordering::Relaxed);
+                sender.input(AppMsg::CycleDeckScreen(1));
+            } else if dy < 0.0 {
+                last_scroll.store(now_us, std::sync::atomic::Ordering::Relaxed);
+                sender.input(AppMsg::CycleDeckScreen(-1));
+            }
+        }
+        gtk4::glib::Propagation::Stop
+    });
+    widget.add_controller(controller);
+}
+
+fn get_ipc_dir() -> std::path::PathBuf {
+    let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run/user/1000".to_string());
+    let dir = std::path::PathBuf::from(runtime).join("takt");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+fn get_monitor_socket_path(mon_name: &str) -> std::path::PathBuf {
+    let clean = mon_name.replace(['-', '.', ':', '/'], "_");
+    get_ipc_dir().join(format!("{}.sock", clean))
+}
+
+fn send_to_sockets(msg: &str, exclude_sock: Option<&str>) -> usize {
+    let dir = get_ipc_dir();
+    let mut sent = 0;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("sock") {
+                if let Some(ex) = exclude_sock {
+                    if path.file_name().and_then(|s| s.to_str()) == Some(ex) {
+                        continue;
+                    }
+                }
+                match UnixStream::connect(&path) {
+                    Ok(mut stream) => {
+                        let _ =
+                            stream.set_write_timeout(Some(std::time::Duration::from_millis(100)));
+                        if stream.write_all(msg.as_bytes()).is_ok() {
+                            sent += 1;
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+    }
+    sent
+}
+
+fn broadcast_ipc_screen_change(screen: DeckScreen, exclude_mon: Option<&str>) {
+    let exclude_filename =
+        exclude_mon.map(|m| format!("{}.sock", m.replace(['-', '.', ':', '/'], "_")));
+    let msg = format!("SET {}\n", screen.as_str());
+    send_to_sockets(&msg, exclude_filename.as_deref());
+}
+
+fn send_ipc_cycle_command(cmd: &str) -> Option<String> {
+    let dir = get_ipc_dir();
+    let mut sock_paths = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("sock") {
+                sock_paths.push(path);
+            }
+        }
+    }
+    sock_paths.sort_by(|a, b| {
+        let a_str = a.to_string_lossy();
+        let b_str = b.to_string_lossy();
+        let a_edp = a_str.contains("eDP");
+        let b_edp = b_str.contains("eDP");
+        match (a_edp, b_edp) {
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, true) => std::cmp::Ordering::Less,
+            _ => a.cmp(b),
+        }
+    });
+
+    for path in sock_paths {
+        match UnixStream::connect(&path) {
+            Ok(mut stream) => {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(300)));
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(300)));
+                if stream.write_all(cmd.as_bytes()).is_ok() {
+                    let mut reader = BufReader::new(stream);
+                    let mut reply = String::new();
+                    if reader.read_line(&mut reply).is_ok() && !reply.trim().is_empty() {
+                        return Some(reply.trim().to_string());
+                    }
+                    return Some("OK".to_string());
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+                let _ = std::fs::remove_file(&path);
+            }
+            Err(_) => {}
+        }
+    }
+    None
+}
+
+fn handle_cli_command(args: &[String]) -> Option<i32> {
+    if args.len() <= 1 {
+        return None;
+    }
+
+    let mut next = false;
+    let mut prev = false;
+    let mut screen: Option<String> = None;
+    let mut status = false;
+    let mut help = false;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-n" | "--next" => next = true,
+            "-p" | "--prev" => prev = true,
+            "-s" | "--screen" => {
+                if i + 1 < args.len() {
+                    screen = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            "--status" => status = true,
+            "-h" | "--help" => help = true,
+            _ => {}
+        }
+        i += 1;
+    }
+
+    if help {
+        println!("takt - SOTA Wayland Tactile Telemetry Deck in Rust\n");
+        println!("USAGE:");
+        println!("  takt [OPTIONS]\n");
+        println!("OPTIONS:");
+        println!("  -n, --next              Cycle to next cockpit deck screen (01 SYS -> 02 PERF -> 03 CAL -> 04 MEDIA)");
+        println!("  -p, --prev              Cycle to previous cockpit deck screen (04 MEDIA -> 03 CAL -> 02 PERF -> 01 SYS)");
+        println!("  -s, --screen <ID|NAME>  Set cockpit deck screen directly (1..4, sys, perf, cal, media)");
+        println!("  -m, --monitor <NAME>    Run bar on specific monitor (daemon mode)");
+        println!("      --status            Query status of running takt instances");
+        println!("  -h, --help              Print this help text");
+        return Some(0);
+    }
+
+    if status {
+        let dir = get_ipc_dir();
+        let mut active = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("sock") {
+                    if let Ok(mut stream) = UnixStream::connect(&path) {
+                        let _ = stream.write_all(b"PING\n");
+                        let mut buf = [0u8; 16];
+                        if let Ok(n) = stream.read(&mut buf) {
+                            if &buf[..n] == b"PONG\n" {
+                                if let Some(stem) = path.file_stem() {
+                                    active.push(stem.to_string_lossy().to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if active.is_empty() {
+            println!("takt: no active daemon instances running.");
+            return Some(1);
+        } else {
+            println!("takt: active daemon instances on: {}", active.join(", "));
+            return Some(0);
+        }
+    }
+
+    if next || prev {
+        let cmd = if next { "NEXT\n" } else { "PREV\n" };
+        if let Some(res) = send_ipc_cycle_command(cmd) {
+            println!("takt: {}", res);
+            return Some(0);
+        } else {
+            eprintln!("takt: error: could not connect to running takt daemon. Is takt running?");
+            return Some(1);
+        }
+    }
+
+    if let Some(target) = screen {
+        if let Some(deck) = DeckScreen::from_str_name(&target) {
+            let cmd = format!("SCREEN {}\n", deck.as_str());
+            let sent = send_to_sockets(&cmd, None);
+            if sent > 0 {
+                println!(
+                    "takt: switched cockpit deck to {} ({} display(s) updated)",
+                    deck.as_str().to_uppercase(),
+                    sent
+                );
+                return Some(0);
+            }
+            std::env::set_var("TAKT_SCREEN", deck.as_str());
+        } else {
+            eprintln!(
+                "takt: invalid screen '{}'. Valid screens: 1 (sys), 2 (perf), 3 (cal), 4 (media)",
+                target
+            );
+            return Some(1);
+        }
+    }
+
+    None
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if let Some(code) = handle_cli_command(&args) {
+        std::process::exit(code);
+    }
+
     let mut target_monitor = std::env::var("TAKT_MONITOR").ok();
     let mut i = 1;
     while i < args.len() {
@@ -2734,5 +3109,29 @@ mod tests {
         // When only external monitor is connected (e.g. laptop lid closed)
         assert_eq!(compute_ws_base("HDMI-A-1", 1, true, 1), 1);
         assert_eq!(compute_ws_base("HDMI-A-1", 1, true, 7), 6);
+    }
+
+    #[test]
+    fn test_deck_screen_cycling() {
+        assert_eq!(DeckScreen::Sys.next(), DeckScreen::Perf);
+        assert_eq!(DeckScreen::Perf.next(), DeckScreen::Cal);
+        assert_eq!(DeckScreen::Cal.next(), DeckScreen::Media);
+        assert_eq!(DeckScreen::Media.next(), DeckScreen::Sys);
+
+        assert_eq!(DeckScreen::Sys.prev(), DeckScreen::Media);
+        assert_eq!(DeckScreen::Perf.prev(), DeckScreen::Sys);
+        assert_eq!(DeckScreen::Cal.prev(), DeckScreen::Perf);
+        assert_eq!(DeckScreen::Media.prev(), DeckScreen::Cal);
+    }
+
+    #[test]
+    fn test_deck_screen_parsing() {
+        assert_eq!(DeckScreen::from_str_name("1"), Some(DeckScreen::Sys));
+        assert_eq!(DeckScreen::from_str_name("sys"), Some(DeckScreen::Sys));
+        assert_eq!(DeckScreen::from_str_name("perf"), Some(DeckScreen::Perf));
+        assert_eq!(DeckScreen::from_str_name("3"), Some(DeckScreen::Cal));
+        assert_eq!(DeckScreen::from_str_name("cal"), Some(DeckScreen::Cal));
+        assert_eq!(DeckScreen::from_str_name("media"), Some(DeckScreen::Media));
+        assert_eq!(DeckScreen::from_str_name("invalid"), None);
     }
 }
