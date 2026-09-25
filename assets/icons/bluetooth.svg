@@ -1,4 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <!-- Nordic Bluetooth Antenna Rune (Bold 1.75px) -->
-  <path d="M 8,1.5 L 8,14.5 M 8,1.5 L 12,5 L 4,11 M 8,14.5 L 12,11 L 4,5" fill="none" stroke="#999208" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Dot-Matrix Flanking Transceivers -->
+  <circle cx="2.5" cy="8" r="1.1" fill="#D8A664"/>
+  <circle cx="13.5" cy="8" r="1.1" fill="#D8A664"/>
+  <!-- Nordic Technical Antenna Rune -->
+  <line x1="8" y1="1.5" x2="8" y2="14.5" stroke="#999208" stroke-width="1.5"/>
+  <polyline points="8,1.5 12,5 4,11" fill="none" stroke="#999208" stroke-width="1.5" stroke-linejoin="miter"/>
+  <polyline points="8,14.5 12,11 4,5" fill="none" stroke="#999208" stroke-width="1.5" stroke-linejoin="miter"/>
 </svg>

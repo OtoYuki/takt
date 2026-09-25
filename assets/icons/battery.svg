@@ -1,10 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <!-- Li-ion Outer Casing (Bold 1.5px) -->
-  <rect x="1" y="3.5" width="12" height="9" rx="1.5" fill="#1c2517" stroke="#D1CF8B" stroke-width="1.5"/>
-  <!-- Positive Anode Terminal -->
-  <path d="M 13.5,6 L 15,6 Q 15.5,6 15.5,6.5 L 15.5,9.5 Q 15.5,10 15,10 L 13.5,10 Z" fill="#D1CF8B"/>
-  <!-- High-Density Cells (Bold blocks) -->
-  <rect x="2.5" y="5" width="2.5" height="6" rx="0.5" fill="#999208"/>
-  <rect x="5.75" y="5" width="2.5" height="6" rx="0.5" fill="#999208"/>
-  <rect x="9" y="5" width="2.5" height="6" rx="0.5" fill="#999208"/>
+  <!-- Industrial Battery Cartridge Casing (0px corners) -->
+  <rect x="1" y="3.5" width="12" height="9" fill="#172213" stroke="#D1CF8B" stroke-width="1.25"/>
+  <!-- Cathode Anode Nub -->
+  <rect x="13.5" y="6" width="1.5" height="4" fill="#D1CF8B"/>
+  <!-- Dot-Matrix Energy Grid (3 columns of 2 dots) -->
+  <!-- Col 1 -->
+  <circle cx="3.5" cy="6.25" r="1.0" fill="#999208"/>
+  <circle cx="3.5" cy="9.75" r="1.0" fill="#999208"/>
+  <!-- Col 2 -->
+  <circle cx="7" cy="6.25" r="1.0" fill="#999208"/>
+  <circle cx="7" cy="9.75" r="1.0" fill="#999208"/>
+  <!-- Col 3 -->
+  <circle cx="10.5" cy="6.25" r="1.0" fill="#999208"/>
+  <circle cx="10.5" cy="9.75" r="1.0" fill="#999208"/>
 </svg>

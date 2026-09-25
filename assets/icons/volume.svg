@@ -1,7 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <!-- Loudspeaker Body -->
-  <path d="M 2,6 L 5,6 L 8.5,3 L 8.5,13 L 5,10 L 2,10 Z" fill="#D8A664"/>
-  <!-- Sound Waves (Bold 1.75px) -->
-  <path d="M 10.5,5.5 Q 12,8 10.5,10.5" fill="none" stroke="#D1CF8B" stroke-width="1.75" stroke-linecap="round"/>
-  <path d="M 13,3.5 Q 15.5,8 13,12.5" fill="none" stroke="#999208" stroke-width="1.75" stroke-linecap="round"/>
+  <!-- Mechanical Transducer Horn -->
+  <polygon points="1.5,5.5 4.5,5.5 8.5,2 8.5,14 4.5,10.5 1.5,10.5" fill="#D8A664"/>
+  <!-- Stippled Acoustic Wave Dots: Tier 1 -->
+  <circle cx="11" cy="5.5" r="0.95" fill="#D1CF8B"/>
+  <circle cx="11.75" cy="8" r="0.95" fill="#D1CF8B"/>
+  <circle cx="11" cy="10.5" r="0.95" fill="#D1CF8B"/>
+  <!-- Stippled Acoustic Wave Dots: Tier 2 -->
+  <circle cx="13.75" cy="3.5" r="0.95" fill="#999208"/>
+  <circle cx="14.75" cy="6.2" r="0.95" fill="#999208"/>
+  <circle cx="15" cy="8" r="0.95" fill="#999208"/>
+  <circle cx="14.75" cy="9.8" r="0.95" fill="#999208"/>
+  <circle cx="13.75" cy="12.5" r="0.95" fill="#999208"/>
 </svg>
