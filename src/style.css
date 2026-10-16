@@ -406,6 +406,15 @@ window.compact button.pod-power {
 	padding: 4px 6px;
 }
 
+.deck-audio-popover {
+	min-width: 280px;
+}
+
+box.bt-device-row.audio-device-active {
+	background-color: #172414;
+	border-color: #334424;
+}
+
 button.deck-ctrl-btn {
 	padding: 2px 7px;
 	border-radius: 2px;

@@ -85,6 +85,14 @@ pub struct BtDeviceInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioDeviceInfo {
+    pub name: String,
+    pub description: String,
+    pub glyph: &'static str,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WifiNetworkInfo {
     pub in_use: bool,
     pub ssid: String,
@@ -124,6 +132,9 @@ struct AppModel {
 
     vol_level: u32,
     vol_muted: bool,
+    audio_sinks: Vec<AudioDeviceInfo>,
+    audio_sources: Vec<AudioDeviceInfo>,
+    audio_dirty: AtomicBool,
     bat_capacity: u32,
     bat_status: String,
     net_quality: Option<u32>,
@@ -193,6 +204,10 @@ enum AppMsg {
     CycleDeckScreen(i32),
     ToggleMute,
     AdjustVolume(i32),
+    RefreshAudioDevices,
+    SetDefaultSink(String),
+    SetDefaultSource(String),
+    UpdateAudioDevices(Vec<AudioDeviceInfo>, Vec<AudioDeviceInfo>),
 
     // Embedded Bluetooth Deck
     ToggleBluetooth,
@@ -1324,11 +1339,13 @@ impl SimpleComponent for AppModel {
                         #[wrap(Some)]
                         set_popover = &gtk4::Popover {
                             add_css_class: "tactile-popover",
+                            connect_show => AppMsg::RefreshAudioDevices,
 
                             gtk4::Box {
                                 set_orientation: gtk4::Orientation::Vertical,
                                 set_spacing: 6,
                                 add_css_class: "popover-content",
+                                add_css_class: "deck-audio-popover",
 
                                 gtk4::Label {
                                     set_markup: "<span font_family='Goga' font_weight='bold' font_size='8.5pt' letter_spacing='1200' foreground='#999208'>AUDIO // OUTPUT SINK</span>",
@@ -1377,6 +1394,30 @@ impl SimpleComponent for AppModel {
                                             "<span font_family='Goga' font_weight='bold' font_size='8.5pt' foreground='#BE5D3C'>󰝟  MUTE AUDIO</span>"
                                         },
                                     }
+                                },
+
+                                gtk4::Label {
+                                    set_halign: gtk4::Align::Start,
+                                    set_margin_top: 4,
+                                    set_markup: "<span font_family='Goga' font_weight='bold' font_size='7.5pt' letter_spacing='1200' foreground='#999208'>OUTPUT</span>",
+                                },
+                                #[name = "audio_sink_list_box"]
+                                gtk4::Box {
+                                    set_orientation: gtk4::Orientation::Vertical,
+                                    set_spacing: 3,
+                                    add_css_class: "device-list-box",
+                                },
+
+                                gtk4::Label {
+                                    set_halign: gtk4::Align::Start,
+                                    set_margin_top: 4,
+                                    set_markup: "<span font_family='Goga' font_weight='bold' font_size='7.5pt' letter_spacing='1200' foreground='#999208'>INPUT</span>",
+                                },
+                                #[name = "audio_source_list_box"]
+                                gtk4::Box {
+                                    set_orientation: gtk4::Orientation::Vertical,
+                                    set_spacing: 3,
+                                    add_css_class: "device-list-box",
                                 },
                             }
                         }
@@ -1453,6 +1494,11 @@ impl SimpleComponent for AppModel {
     fn post_view() {
         if model.wifi_selected_ssid.is_none() {
             wifi_password_entry.set_text("");
+        }
+
+        if model.audio_dirty.swap(false, Ordering::Relaxed) {
+            fill_audio_list(audio_sink_list_box, &model.audio_sinks, true, &sender);
+            fill_audio_list(audio_source_list_box, &model.audio_sources, false, &sender);
         }
 
         if model.bt_dirty.swap(false, Ordering::Relaxed) {
@@ -1719,6 +1765,7 @@ impl SimpleComponent for AppModel {
         let (week_ribbon, week_stats) = format_calendar();
 
         let (vol_level, vol_muted) = read_volume();
+        let (audio_sinks, audio_sources) = read_audio_devices();
         let (bat_capacity, bat_status) = read_battery();
         let (net_quality, net_type, net_ssid) = read_network();
         let (bluetooth_powered, bluetooth_device) = read_bluetooth();
@@ -1767,6 +1814,9 @@ impl SimpleComponent for AppModel {
 
             vol_level,
             vol_muted,
+            audio_sinks,
+            audio_sources,
+            audio_dirty: AtomicBool::new(true),
             bat_capacity,
             bat_status,
             net_quality,
@@ -1940,8 +1990,10 @@ impl SimpleComponent for AppModel {
                     std::thread::spawn(move || {
                         let devs = read_bluetooth_devices();
                         let nets = read_wifi_networks();
+                        let (sinks, sources) = read_audio_devices();
                         s_sync.input(AppMsg::UpdateBtDevices(devs));
                         s_sync.input(AppMsg::UpdateWifiNetworks(nets));
+                        s_sync.input(AppMsg::UpdateAudioDevices(sinks, sources));
                     });
                 }
             }
@@ -2110,6 +2162,39 @@ impl SimpleComponent for AppModel {
                 let _ = std::process::Command::new("wpctl")
                     .args(["set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", &arg])
                     .status();
+                let (vol, muted) = read_volume();
+                self.vol_level = vol;
+                self.vol_muted = muted;
+            }
+            AppMsg::RefreshAudioDevices => {
+                let sender_c = _sender.clone();
+                std::thread::spawn(move || {
+                    let (sinks, sources) = read_audio_devices();
+                    sender_c.input(AppMsg::UpdateAudioDevices(sinks, sources));
+                });
+            }
+            AppMsg::SetDefaultSink(name) => {
+                let sender_c = _sender.clone();
+                std::thread::spawn(move || {
+                    set_default_audio_device(true, &name);
+                    let (sinks, sources) = read_audio_devices();
+                    sender_c.input(AppMsg::UpdateAudioDevices(sinks, sources));
+                });
+            }
+            AppMsg::SetDefaultSource(name) => {
+                let sender_c = _sender.clone();
+                std::thread::spawn(move || {
+                    set_default_audio_device(false, &name);
+                    let (sinks, sources) = read_audio_devices();
+                    sender_c.input(AppMsg::UpdateAudioDevices(sinks, sources));
+                });
+            }
+            AppMsg::UpdateAudioDevices(sinks, sources) => {
+                if sinks != self.audio_sinks || sources != self.audio_sources {
+                    self.audio_sinks = sinks;
+                    self.audio_sources = sources;
+                    self.audio_dirty.store(true, Ordering::Relaxed);
+                }
                 let (vol, muted) = read_volume();
                 self.vol_level = vol;
                 self.vol_muted = muted;
@@ -2328,6 +2413,177 @@ fn read_volume() -> (u32, bool) {
         }
     }
     (100, false)
+}
+
+/// Sinks and sources as PipeWire's pulse server reports them, monitors excluded.
+fn read_audio_devices() -> (Vec<AudioDeviceInfo>, Vec<AudioDeviceInfo>) {
+    (
+        read_audio_list("sinks", "get-default-sink"),
+        read_audio_list("sources", "get-default-source"),
+    )
+}
+
+fn read_audio_list(kind: &str, default_cmd: &str) -> Vec<AudioDeviceInfo> {
+    let default = std::process::Command::new("pactl")
+        .arg(default_cmd)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let Ok(out) = std::process::Command::new("pactl")
+        .args(["-f", "json", "list", kind])
+        .output()
+    else {
+        return Vec::new();
+    };
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_slice(&out.stdout) else {
+        return Vec::new();
+    };
+    let is_sink = kind == "sinks";
+    items
+        .iter()
+        .filter_map(|item| {
+            let props = item.get("properties")?;
+            let prop = |key: &str| props.get(key).and_then(|v| v.as_str()).unwrap_or("");
+            if prop("device.class") == "monitor" {
+                return None;
+            }
+            let name = item.get("name")?.as_str()?.to_string();
+            let description = item
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&name)
+                .to_string();
+            let lname = name.to_lowercase();
+            let glyph = if name.starts_with("bluez_") || prop("device.bus") == "bluetooth" {
+                "󰋋"
+            } else if lname.contains("hdmi") {
+                "󰍹"
+            } else if lname.contains("headphone") || lname.contains("headset") {
+                "󰋋"
+            } else if is_sink {
+                "󰓃"
+            } else {
+                "󰍬"
+            };
+            Some(AudioDeviceInfo {
+                is_default: name == default,
+                name,
+                description,
+                glyph,
+            })
+        })
+        .collect()
+}
+
+/// Make `name` the default sink/source and move every movable stream onto it, so playing
+/// audio follows the switch even when the stream was pinned to the previous device.
+fn set_default_audio_device(is_sink: bool, name: &str) {
+    let (set_cmd, streams, move_cmd) = if is_sink {
+        ("set-default-sink", "sink-inputs", "move-sink-input")
+    } else {
+        ("set-default-source", "source-outputs", "move-source-output")
+    };
+    let _ = std::process::Command::new("pactl")
+        .args([set_cmd, name])
+        .status();
+    let Ok(out) = std::process::Command::new("pactl")
+        .args(["-f", "json", "list", streams])
+        .output()
+    else {
+        return;
+    };
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_slice(&out.stdout) else {
+        return;
+    };
+    for item in &items {
+        let Some(index) = item.get("index").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+        let props = item.get("properties");
+        let prop = |key: &str| {
+            props
+                .and_then(|p| p.get(key))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+        };
+        // WirePlumber's Bluetooth loopbacks and streams that asked not to be moved stay put
+        if prop("media.class").ends_with("/Internal")
+            || prop("node.name").starts_with("bluez_")
+            || prop("node.dont-move") == "true"
+        {
+            continue;
+        }
+        let _ = std::process::Command::new("pactl")
+            .args([move_cmd, &index.to_string(), name])
+            .status();
+    }
+}
+
+fn fill_audio_list(
+    list: &gtk4::Box,
+    devices: &[AudioDeviceInfo],
+    is_sink: bool,
+    sender: &ComponentSender<AppModel>,
+) {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+    if devices.is_empty() {
+        let empty_lbl = markup_label(
+            "<span font_family='Geist Mono' font_size='8pt' foreground='#5A6042'>NO DEVICES</span>",
+        );
+        empty_lbl.set_margin_top(4);
+        empty_lbl.set_margin_bottom(4);
+        list.append(&empty_lbl);
+        return;
+    }
+    for dev in devices {
+        let row = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(8)
+            .css_classes(["bt-device-row"])
+            .build();
+        if dev.is_default {
+            row.add_css_class("audio-device-active");
+        }
+
+        row.append(&markup_label(&format!(
+            "<span font_family='Geist Mono' font_size='10pt' foreground='{}'>{}</span>",
+            if dev.is_default { "#999208" } else { "#5A6042" },
+            dev.glyph
+        )));
+
+        let name_lbl = markup_label(&format!(
+            "<span font_family='Geist Mono' font_weight='bold' font_size='8pt' foreground='{}'>{}</span>",
+            if dev.is_default { "#FBFFE1" } else { "#D1CF8B" },
+            gtk4::glib::markup_escape_text(&dev.description)
+        ));
+        name_lbl.set_hexpand(true);
+        name_lbl.set_halign(gtk4::Align::Start);
+        name_lbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        name_lbl.set_max_width_chars(28);
+        row.append(&name_lbl);
+
+        if dev.is_default {
+            row.append(&markup_label("<span font_family='Geist Mono' font_weight='bold' font_size='7pt' foreground='#999208'>ACTIVE</span>"));
+        } else {
+            let btn = gtk4::Button::builder()
+                .css_classes(["btn-action-connect"])
+                .build();
+            btn.set_child(Some(&markup_label("<span font_family='Geist Mono' font_weight='bold' font_size='7pt' foreground='#141C10'>USE</span>")));
+            let sender_c = sender.clone();
+            let name_c = dev.name.clone();
+            btn.connect_clicked(move |_| {
+                sender_c.input(if is_sink {
+                    AppMsg::SetDefaultSink(name_c.clone())
+                } else {
+                    AppMsg::SetDefaultSource(name_c.clone())
+                });
+            });
+            row.append(&btn);
+        }
+        list.append(&row);
+    }
 }
 
 fn read_battery() -> (u32, String) {
