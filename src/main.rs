@@ -238,16 +238,24 @@ enum AppMsg {
     TriggerLauncher,
 }
 
+/// Asset lookup order: `$TAKT_ASSETS`, the source tree this binary was built from,
+/// then `$XDG_DATA_HOME/takt/assets` (default `~/.local/share/takt/assets`).
 fn get_asset_path(rel: &str) -> Option<String> {
-    let dev = std::path::Path::new("/home/s1re/dev/takt/assets").join(rel);
-    if dev.exists() {
-        return Some(dev.to_string_lossy().to_string());
-    }
-    let share = std::path::Path::new("/home/s1re/.local/share/takt/assets").join(rel);
-    if share.exists() {
-        return Some(share.to_string_lossy().to_string());
-    }
-    None
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".local/share"))
+        });
+    std::env::var_os("TAKT_ASSETS")
+        .map(std::path::PathBuf::from)
+        .into_iter()
+        .chain(std::iter::once(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets"),
+        ))
+        .chain(data_home.map(|d| d.join("takt/assets")))
+        .map(|dir| dir.join(rel))
+        .find(|p| p.exists())
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 #[allow(dead_code)]
